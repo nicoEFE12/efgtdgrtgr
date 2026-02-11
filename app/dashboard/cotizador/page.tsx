@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { useConfirm } from "@/hooks/use-confirm";
+import jsPDF from "jspdf";
 import {
   Calculator,
   Plus,
@@ -18,6 +19,8 @@ import {
   Percent,
   Copy,
   FolderPlus,
+  Download,
+  Building2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -650,6 +653,433 @@ export default function CotizadorPage() {
     }
   }
 
+  async function generateQuotationCommercialPDF(id: number) {
+    try {
+      const res = await fetch(`/api/cotizaciones/${id}`);
+      if (!res.ok) {
+        toast.error("Error al cargar cotización");
+        return;
+      }
+      
+      const { quotation: q } = await res.json();
+      const pdf = new jsPDF();
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const company = settings.company_name || "Am Soluciones Constructivas";
+      
+      // Header
+      pdf.setFontSize(20);
+      pdf.setTextColor(37, 99, 235);
+      pdf.text(company, 20, 25);
+      
+      pdf.setFontSize(16);
+      pdf.setTextColor(0, 0, 0);
+      pdf.text("PRESUPUESTO", 20, 40);
+      
+      pdf.setFontSize(12);
+      pdf.text(`Cliente: ${q.client_name || 'Cliente'}`, 20, 55);
+      pdf.text(`Proyecto: ${q.nombre}`, 20, 65);
+      pdf.text(`Fecha: ${new Date(q.created_at).toLocaleDateString('es-AR')}`, 20, 75);
+      
+      if (q.notas) {
+        pdf.text("Condiciones:", 20, 85);
+        const notasLines = pdf.splitTextToSize(q.notas, pageWidth - 40);
+        pdf.text(notasLines, 20, 95);
+      }
+      
+      let yPos = q.notas ? 115 : 90;
+      
+      // Table header
+      pdf.setFontSize(10);
+      pdf.setFillColor(37, 99, 235);
+      pdf.setTextColor(255, 255, 255);
+      pdf.rect(20, yPos, pageWidth - 40, 8, "F");
+      pdf.text("DESCRIPCIÓN", 25, yPos + 6);
+      pdf.text("CANT.", pageWidth - 80, yPos + 6);
+      pdf.text("PRECIO", pageWidth - 50, yPos + 6);
+      
+      yPos += 12;
+      pdf.setTextColor(0, 0, 0);
+      
+      // Items - calculate margin proportionally
+      const costoTotal = Number(q.costo_total);
+      const totalFinal = Number(q.total);
+      const margenTotal = totalFinal - costoTotal;
+      
+      q.items.forEach((item: any, index: number) => {
+        if (yPos > 250) {
+          pdf.addPage();
+          yPos = 30;
+        }
+        
+        const cantidad = item.m2 || 1;
+        const unidad = item.unidad || "m2";
+        const subtotal = Number(item.subtotal);
+        
+        // Distribute margin proportionally
+        const margenItem = costoTotal > 0 ? (subtotal / costoTotal) * margenTotal : 0;
+        const precioFinal = subtotal + margenItem;
+        
+        // Description
+        const desc = item.descripcion || `Rubro ${index + 1}`;
+        const descLines = pdf.splitTextToSize(desc, pageWidth - 120);
+        pdf.text(descLines, 25, yPos + 4);
+        
+        // Quantity
+        pdf.text(`${cantidad} ${unidad}`, pageWidth - 80, yPos + 4, { align: "right" });
+        
+        // Price
+        pdf.text(`$${Math.round(precioFinal).toLocaleString('es-AR')}`, pageWidth - 30, yPos + 4, { align: "right" });
+        
+        yPos += Math.max(descLines.length * 5, 8) + 2;
+      });
+      
+      // Total
+      yPos += 10;
+      pdf.setFontSize(12);
+      pdf.setFillColor(240, 240, 240);
+      pdf.rect(20, yPos, pageWidth - 40, 10, "F");
+      pdf.setFont(undefined, "bold");
+      pdf.text(`TOTAL: $${Math.round(totalFinal).toLocaleString('es-AR')}`, pageWidth - 30, yPos + 7, { align: "right" });
+      
+      // Footer
+      pdf.setFontSize(8);
+      pdf.setFont(undefined, "normal");
+      pdf.setTextColor(128, 128, 128);
+      yPos += 25;
+      if (yPos > 270) {
+        pdf.addPage();
+        yPos = 30;
+      }
+      pdf.text("Presupuesto válido por 30 días.", 20, yPos);
+      pdf.text("Gracias por confiar en nosotros.", 20, yPos + 10);
+      
+      pdf.save(`presupuesto-${q.nombre.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
+      toast.success("Presupuesto comercial descargado");
+    } catch (error) {
+      toast.error("Error al generar PDF");
+    }
+  }
+  
+  async function generateQuotationTechnicalPDF(id: number) {
+    try {
+      const res = await fetch(`/api/cotizaciones/${id}`);
+      if (!res.ok) {
+        toast.error("Error al cargar cotización");
+        return;
+      }
+      
+      const { quotation: q } = await res.json();
+      const pdf = new jsPDF();
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const company = settings.company_name || "Am Soluciones Constructivas";
+      
+      // Header
+      pdf.setFontSize(20);
+      pdf.setTextColor(37, 99, 235);
+      pdf.text(company, 20, 25);
+      
+      pdf.setFontSize(16);
+      pdf.setTextColor(0, 0, 0);
+      pdf.text("PRESUPUESTO TÉCNICO", 20, 40);
+      
+      pdf.setFontSize(12);
+      pdf.text(`Proyecto: ${q.nombre}`, 20, 55);
+      pdf.text(`Fecha: ${new Date(q.created_at).toLocaleDateString('es-AR')}`, 20, 65);
+      
+      let yPos = 80;
+      
+      // Cost breakdown
+      pdf.setFontSize(14);
+      pdf.setFont(undefined, "bold");
+      pdf.text("DESGLOSE DE COSTOS", 20, yPos);
+      yPos += 15;
+      
+      pdf.setFontSize(10);
+      pdf.setFont(undefined, "normal");
+      
+      q.items.forEach((item: any, index: number) => {
+        if (yPos > 240) {
+          pdf.addPage();
+          yPos = 30;
+        }
+        
+        pdf.setFont(undefined, "bold");
+        pdf.text(`${index + 1}. ${item.descripcion || `Rubro ${index + 1}`}`, 20, yPos);
+        yPos += 8;
+        
+        pdf.setFont(undefined, "normal");
+        pdf.text(`   Cantidad: ${item.m2 || 1} ${item.unidad || 'm2'}`, 25, yPos);
+        yPos += 5;
+        pdf.text(`   Materiales: $${Math.round(Number(item.costo_materiales)).toLocaleString('es-AR')}`, 25, yPos);
+        yPos += 5;
+        pdf.text(`   Mano de obra: $${Math.round(Number(item.costo_mano_obra)).toLocaleString('es-AR')}`, 25, yPos);
+        yPos += 5;
+        pdf.text(`   Costos fijos: $${Math.round(Number(item.costo_fijos_prorrateados)).toLocaleString('es-AR')}`, 25, yPos);
+        yPos += 5;
+        pdf.setFont(undefined, "bold");
+        pdf.text(`   Subtotal: $${Math.round(Number(item.subtotal)).toLocaleString('es-AR')}`, 25, yPos);
+        yPos += 10;
+      });
+      
+      // Summary
+      yPos += 15;
+      if (yPos > 250) {
+        pdf.addPage();
+        yPos = 30;
+      }
+      
+      pdf.setFontSize(12);
+      pdf.setFont(undefined, "bold");
+      pdf.text("RESUMEN FINANCIERO", 20, yPos);
+      yPos += 10;
+      
+      pdf.setFont(undefined, "normal");
+      const costoTotal = Number(q.costo_total);
+      const totalFinal = Number(q.total);
+      const margenTotal = totalFinal - costoTotal;
+      
+      pdf.text(`Costo base: $${Math.round(costoTotal).toLocaleString('es-AR')}`, 20, yPos);
+      yPos += 8;
+      
+      if (margenTotal > 0) {
+        const porcentajeMargen = costoTotal > 0 ? ((margenTotal / costoTotal) * 100).toFixed(1) : "0";
+        pdf.text(`Margen (${porcentajeMargen}%): $${Math.round(margenTotal).toLocaleString('es-AR')}`, 20, yPos);
+        yPos += 8;
+      }
+      
+      pdf.setFont(undefined, "bold");
+      pdf.text(`TOTAL: $${Math.round(totalFinal).toLocaleString('es-AR')}`, 20, yPos);
+      
+      pdf.save(`presupuesto-tecnico-${q.nombre.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
+      toast.success("Presupuesto técnico descargado");
+    } catch (error) {
+      toast.error("Error al generar PDF técnico");
+    }
+  }
+
+  function generateCommercialPDF() {
+    if (!nombre || items.length === 0) {
+      toast.error("Completa el nombre y agrega rubros antes de exportar");
+      return;
+    }
+
+    const pdf = new jsPDF();
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const company = settings.company_name || "Am Soluciones Constructivas";
+    const clientName = clientId ? clientsList.find(c => c.id.toString() === clientId)?.apellido_nombre || "Cliente" : "Cliente";
+    
+    // Header
+    pdf.setFontSize(20);
+    pdf.setTextColor(37, 99, 235); // rgb(37,99,235)
+    pdf.text(company, 20, 25);
+    
+    pdf.setFontSize(16);
+    pdf.setTextColor(0, 0, 0);
+    pdf.text("PRESUPUESTO", 20, 40);
+    
+    pdf.setFontSize(12);
+    pdf.text(`Cliente: ${clientName}`, 20, 55);
+    pdf.text(`Proyecto: ${nombre}`, 20, 65);
+    pdf.text(`Fecha: ${new Date().toLocaleDateString('es-AR')}`, 20, 75);
+    
+    if (notas) {
+      pdf.text("Condiciones:", 20, 85);
+      const notasLines = pdf.splitTextToSize(notas, pageWidth - 40);
+      pdf.text(notasLines, 20, 95);
+    }
+    
+    let yPos = notas ? 115 : 90;
+    
+    // Table header
+    pdf.setFontSize(10);
+    pdf.setFillColor(37, 99, 235);
+    pdf.setTextColor(255, 255, 255);
+    pdf.rect(20, yPos, pageWidth - 40, 8, "F");
+    pdf.text("DESCRIPCIÓN", 25, yPos + 6);
+    pdf.text("CANT.", pageWidth - 80, yPos + 6);
+    pdf.text("PRECIO", pageWidth - 50, yPos + 6);
+    
+    yPos += 12;
+    pdf.setTextColor(0, 0, 0);
+    
+    // Items
+    items.forEach((item, index) => {
+      if (yPos > 250) {
+        pdf.addPage();
+        yPos = 30;
+      }
+      
+      const cantidad = item.m2 || 1;
+      const unidad = item.unidad || "m2";
+      
+      // Description
+      const desc = item.descripcion || `Rubro ${index + 1}`;
+      const descLines = pdf.splitTextToSize(desc, pageWidth - 120);
+      pdf.text(descLines, 25, yPos + 4);
+      
+      // Quantity
+      pdf.text(`${cantidad} ${unidad}`, pageWidth - 80, yPos + 4, { align: "right" });
+      
+      // Price
+      pdf.text(`$${formatMoney(item.subtotal + (applyMargin ? item.subtotal * (margenGanancia / 100) : 0))}`, pageWidth - 30, yPos + 4, { align: "right" });
+      
+      yPos += Math.max(descLines.length * 5, 8) + 2;
+    });
+    
+    // Total
+    yPos += 10;
+    pdf.setFontSize(12);
+    pdf.setFillColor(240, 240, 240);
+    pdf.rect(20, yPos, pageWidth - 40, 10, "F");
+    pdf.setFont(undefined, "bold");
+    pdf.text(`TOTAL: $${formatMoney(total)}`, pageWidth - 30, yPos + 7, { align: "right" });
+    
+    // Footer
+    pdf.setFontSize(8);
+    pdf.setFont(undefined, "normal");
+    pdf.setTextColor(128, 128, 128);
+    yPos += 25;
+    if (yPos > 270) {
+      pdf.addPage();
+      yPos = 30;
+    }
+    pdf.text("Presupuesto válido por 30 días.", 20, yPos);
+    pdf.text("Gracias por confiar en nosotros.", 20, yPos + 10);
+    
+    pdf.save(`presupuesto-${nombre.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
+    toast.success("Presupuesto comercial exportado");
+  }
+  
+  function generateTechnicalPDF() {
+    if (!nombre || items.length === 0) {
+      toast.error("Completa el nombre y agrega rubros antes de exportar");
+      return;
+    }
+
+    const pdf = new jsPDF();
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const company = settings.company_name || "Am Soluciones Constructivas";
+    
+    // Header
+    pdf.setFontSize(20);
+    pdf.setTextColor(37, 99, 235);
+    pdf.text(company, 20, 25);
+    
+    pdf.setFontSize(16);
+    pdf.setTextColor(0, 0, 0);
+    pdf.text("PRESUPUESTO TÉCNICO", 20, 40);
+    
+    pdf.setFontSize(12);
+    pdf.text(`Proyecto: ${nombre}`, 20, 55);
+    pdf.text(`Fecha: ${new Date().toLocaleDateString('es-AR')}`, 20, 65);
+    
+    let yPos = 80;
+    
+    // Cost breakdown
+    pdf.setFontSize(14);
+    pdf.setFont(undefined, "bold");
+    pdf.text("DESGLOSE DE COSTOS", 20, yPos);
+    yPos += 15;
+    
+    pdf.setFontSize(10);
+    pdf.setFont(undefined, "normal");
+    
+    items.forEach((item, index) => {
+      if (yPos > 240) {
+        pdf.addPage();
+        yPos = 30;
+      }
+      
+      pdf.setFont(undefined, "bold");
+      pdf.text(`${index + 1}. ${item.descripcion || `Rubro ${index + 1}`}`, 20, yPos);
+      yPos += 8;
+      
+      pdf.setFont(undefined, "normal");
+      pdf.text(`   Cantidad: ${item.m2 || 1} ${item.unidad || 'm2'}`, 25, yPos);
+      yPos += 5;
+      pdf.text(`   Materiales: $${formatMoney(item.costo_materiales)}`, 25, yPos);
+      yPos += 5;
+      pdf.text(`   Mano de obra: $${formatMoney(item.costo_mano_obra)}`, 25, yPos);
+      yPos += 5;
+      pdf.text(`   Costos fijos: $${formatMoney(item.costo_fijos_prorrateados)}`, 25, yPos);
+      yPos += 5;
+      pdf.setFont(undefined, "bold");
+      pdf.text(`   Subtotal: $${formatMoney(item.subtotal)}`, 25, yPos);
+      yPos += 10;
+    });
+    
+    // Materials list
+    if (materialsPurchasingList.length > 0) {
+      if (yPos > 200) {
+        pdf.addPage();
+        yPos = 30;
+      }
+      
+      yPos += 10;
+      pdf.setFontSize(14);
+      pdf.setFont(undefined, "bold");
+      pdf.text("LISTA DE MATERIALES PARA COMPRAS", 20, yPos);
+      yPos += 15;
+      
+      // Table header
+      pdf.setFontSize(10);
+      pdf.setFillColor(37, 99, 235);
+      pdf.setTextColor(255, 255, 255);
+      pdf.rect(20, yPos, pageWidth - 40, 8, "F");
+      pdf.text("MATERIAL", 25, yPos + 6);
+      pdf.text("CANT.", pageWidth - 100, yPos + 6);
+      pdf.text("UNIDAD", pageWidth - 70, yPos + 6);
+      pdf.text("PRECIO UNIT.", pageWidth - 40, yPos + 6);
+      
+      yPos += 12;
+      pdf.setTextColor(0, 0, 0);
+      
+      materialsPurchasingList.forEach((mat) => {
+        if (yPos > 260) {
+          pdf.addPage();
+          yPos = 30;
+        }
+        
+        const matName = mat.nombre || `Material ${mat.material_id}`;
+        const matLines = pdf.splitTextToSize(matName, pageWidth - 140);
+        pdf.text(matLines, 25, yPos + 4);
+        
+        pdf.text(String(mat.cantidad), pageWidth - 100, yPos + 4, { align: "right" });
+        pdf.text(mat.unidad || "-", pageWidth - 70, yPos + 4, { align: "right" });
+        pdf.text(`$${formatMoney(mat.precio_unitario)}`, pageWidth - 25, yPos + 4, { align: "right" });
+        
+        yPos += Math.max(matLines.length * 5, 8) + 2;
+      });
+    }
+    
+    // Summary
+    yPos += 15;
+    if (yPos > 250) {
+      pdf.addPage();
+      yPos = 30;
+    }
+    
+    pdf.setFontSize(12);
+    pdf.setFont(undefined, "bold");
+    pdf.text("RESUMEN FINANCIERO", 20, yPos);
+    yPos += 10;
+    
+    pdf.setFont(undefined, "normal");
+    pdf.text(`Costo base: $${formatMoney(costoBase)}`, 20, yPos);
+    yPos += 8;
+    
+    if (applyMargin && margenGanancia > 0) {
+      pdf.text(`Margen (${margenGanancia}%): $${formatMoney(costoBase * (margenGanancia / 100))}`, 20, yPos);
+      yPos += 8;
+    }
+    
+    pdf.setFont(undefined, "bold");
+    pdf.text(`TOTAL: $${formatMoney(total)}`, 20, yPos);
+    
+    pdf.save(`presupuesto-tecnico-${nombre.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
+    toast.success("Presupuesto técnico exportado");
+  }
+
   const statusColors: Record<string, string> = {
     borrador: "bg-muted text-muted-foreground",
     enviada:
@@ -1197,7 +1627,7 @@ export default function CotizadorPage() {
                     <Send className="mr-2 h-4 w-4" />
                     Marcar como Enviada
                   </Button>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <Button
                       variant="outline"
                       size="sm"
@@ -1217,6 +1647,26 @@ export default function CotizadorPage() {
                         Compras
                       </Button>
                     )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={generateCommercialPDF}
+                      disabled={!nombre || items.length === 0}
+                      className="text-xs"
+                    >
+                      <Download className="mr-1 h-3.5 w-3.5" />
+                      PDF Cliente
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={generateTechnicalPDF}
+                      disabled={!nombre || items.length === 0}
+                      className="text-xs"
+                    >
+                      <Building2 className="mr-1 h-3.5 w-3.5" />
+                      PDF Técnico
+                    </Button>
                   </div>
                 </div>
               </CardContent>
@@ -1500,6 +1950,19 @@ export default function CotizadorPage() {
                               >
                                 <Copy className="mr-2 h-4 w-4" />
                                 Duplicar
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => generateQuotationCommercialPDF(q.id)}
+                              >
+                                <Download className="mr-2 h-4 w-4" />
+                                PDF Cliente
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => generateQuotationTechnicalPDF(q.id)}
+                              >
+                                <Building2 className="mr-2 h-4 w-4" />
+                                PDF Técnico
                               </DropdownMenuItem>
                               {q.estado === "borrador" && (
                                 <>

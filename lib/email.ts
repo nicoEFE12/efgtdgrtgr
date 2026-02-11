@@ -15,9 +15,8 @@ export async function sendVerificationEmail(
   token: string,
   name: string
 ) {
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : "http://localhost:3000";
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
 
   const verifyUrl = `${baseUrl}/api/auth/verify?token=${token}`;
 
@@ -64,9 +63,8 @@ export async function sendPasswordResetEmail(
   token: string,
   name: string
 ) {
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : "http://localhost:3000";
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
 
   const resetUrl = `${baseUrl}/login/reset-password?token=${token}`;
 
