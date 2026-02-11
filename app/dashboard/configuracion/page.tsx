@@ -1,8 +1,24 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import useSWR from "swr";
-import { Save, Building2, Percent, DollarSign, Mail, Trash2, Plus, Shield, Loader2 } from "lucide-react";
+import {
+  Save,
+  Building2,
+  Percent,
+  DollarSign,
+  Mail,
+  Trash2,
+  Plus,
+  Shield,
+  Loader2,
+  Calculator,
+  CalendarDays,
+  Landmark,
+  TrendingUp,
+  Info,
+  ArrowRight,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -23,9 +39,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { toast } from "sonner";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
+
+function formatCurrency(n: number) {
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n);
+}
 
 export default function ConfiguracionPage() {
   const { data: settings, mutate } = useSWR("/api/settings", fetcher);
@@ -49,6 +80,41 @@ export default function ConfiguracionPage() {
     }
   }, [settings]);
 
+  // Live preview calculations
+  const preview = useMemo(() => {
+    const costoMensual = Number(costoFijoMensual) || 0;
+    const dias = Number(diasLaborables) || 22;
+    const margen = Number(defaultMargin) || 0;
+    const cargas = Number(cargasSociales) || 0;
+
+    const costoDiario = dias > 0 ? costoMensual / dias : 0;
+
+    // Example: 10m² job with 2 days of work, $5000 materials, $3000/day labor
+    const ejemploM2 = 10;
+    const ejemploDias = 2;
+    const ejemploMateriales = 5000;
+    const ejemploMODia = 3000;
+    const ejemploMO = ejemploDias * ejemploMODia * (1 + cargas / 100);
+    const ejemploFijos = costoDiario * ejemploDias;
+    const ejemploSubtotal = ejemploMateriales + ejemploMO + ejemploFijos;
+    const ejemploMargen = ejemploSubtotal * (margen / 100);
+    const ejemploTotal = ejemploSubtotal + ejemploMargen;
+
+    return {
+      costoDiario,
+      ejemplo: {
+        m2: ejemploM2,
+        dias: ejemploDias,
+        materiales: ejemploMateriales,
+        manoObra: ejemploMO,
+        fijos: ejemploFijos,
+        subtotal: ejemploSubtotal,
+        margen: ejemploMargen,
+        total: ejemploTotal,
+      },
+    };
+  }, [costoFijoMensual, diasLaborables, defaultMargin, cargasSociales]);
+
   async function handleSave() {
     setSaving(true);
     try {
@@ -65,10 +131,10 @@ export default function ConfiguracionPage() {
         }),
       });
       if (res.ok) {
-        toast.success("Configuracion guardada");
+        toast.success("Configuración guardada correctamente");
         mutate();
       } else {
-        toast.error("Error al guardar");
+        toast.error("Error al guardar la configuración");
       }
     } finally {
       setSaving(false);
@@ -76,129 +142,346 @@ export default function ConfiguracionPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Configuración"
-        description="Ajustes generales del sistema"
-      />
+    <TooltipProvider>
+      <div className="space-y-6">
+        <PageHeader
+          title="Configuración"
+          description="Parámetros globales que alimentan al cotizador y otros módulos del sistema"
+        />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* ── Section: Empresa ──────────────────────────── */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Building2 className="h-5 w-5" />
+              <Building2 className="h-5 w-5 text-blue-600" />
               Datos de la Empresa
             </CardTitle>
             <CardDescription>
-              Informacion que aparece en cotizaciones y documentos
+              Información que aparece en cotizaciones, facturas y documentos generados
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Nombre de la Empresa</Label>
-              <Input
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
-              />
+          <CardContent>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Nombre de la Empresa</Label>
+                <Input
+                  value={companyName}
+                  onChange={(e) => setCompanyName(e.target.value)}
+                  placeholder="Mi Empresa S.A."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  <DollarSign className="h-4 w-4" />
+                  Tipo de Cambio USD
+                </Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={dollarRate}
+                  onChange={(e) => setDollarRate(e.target.value)}
+                  placeholder="1200"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Conversión de precios en dólares a pesos
+                </p>
+              </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Percent className="h-5 w-5" />
-              Parametros Financieros
-            </CardTitle>
-            <CardDescription>
-              Valores por defecto para calculos
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Margen de Ganancia por Defecto (%)</Label>
-              <Input
-                type="number"
-                value={defaultMargin}
-                onChange={(e) => setDefaultMargin(e.target.value)}
-                min={0}
-                max={100}
-              />
-            </div>
-            <Separator />
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                <DollarSign className="h-4 w-4" />
-                Tipo de Cambio USD
-              </Label>
-              <Input
-                type="number"
-                step="0.01"
-                value={dollarRate}
-                onChange={(e) => setDollarRate(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Usado para conversion de precios en dolares
-              </p>
-            </div>
-            <Separator />
-            <div className="space-y-2">
-              <Label>Costo Fijo Mensual ($)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                value={costoFijoMensual}
-                onChange={(e) => setCostoFijoMensual(e.target.value)}
-                min={0}
-              />
-              <p className="text-xs text-muted-foreground">
-                Costos fijos mensuales de la empresa (alquiler, servicios,
-                sueldos fijos)
-              </p>
-            </div>
-            <Separator />
-            <div className="space-y-2">
-              <Label>Dias Laborables por Mes</Label>
-              <Input
-                type="number"
-                value={diasLaborables}
-                onChange={(e) => setDiasLaborables(e.target.value)}
-                min={1}
-                max={31}
-              />
-              <p className="text-xs text-muted-foreground">
-                Cantidad de dias laborables promedio por mes
-              </p>
-            </div>
-            <Separator />
-            <div className="space-y-2">
-              <Label>Cargas Sociales (%)</Label>
-              <Input
-                type="number"
-                step="0.1"
-                value={cargasSociales}
-                onChange={(e) => setCargasSociales(e.target.value)}
-                min={0}
-                max={100}
-              />
-              <p className="text-xs text-muted-foreground">
-                Porcentaje de cargas sociales aplicado sobre mano de obra
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+        {/* ── Section: Costos Fijos ────────────────────── */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="lg:col-span-2 space-y-6">
+            <Card className="border-blue-200 dark:border-blue-900">
+              <CardHeader className="pb-4">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Landmark className="h-5 w-5 text-blue-600" />
+                      Costos Fijos de la Empresa
+                    </CardTitle>
+                    <CardDescription className="mt-1">
+                      Se prorratean proporcionalmente en cada cotización según los días estimados de trabajo
+                    </CardDescription>
+                  </div>
+                  <Badge variant="outline" className="text-blue-600 border-blue-300 bg-blue-50 dark:bg-blue-950 shrink-0">
+                    <Calculator className="h-3 w-3 mr-1" />
+                    Alimenta al Cotizador
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-1.5 font-medium">
+                      Costo Fijo Mensual
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[280px]">
+                          <p>Suma de todos los gastos fijos mensuales: alquiler, servicios, sueldos administrativos, seguros, etc.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </Label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={costoFijoMensual}
+                        onChange={(e) => setCostoFijoMensual(e.target.value)}
+                        min={0}
+                        className="pl-7"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Alquiler + servicios + sueldos fijos + seguros
+                    </p>
+                  </div>
 
-      <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={saving}>
-          <Save className="mr-2 h-4 w-4" />
-          {saving ? "Guardando..." : "Guardar Configuracion"}
-        </Button>
-      </div>
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-1.5 font-medium">
+                      Días Laborables por Mes
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[280px]">
+                          <p>Cantidad promedio de días hábiles que se trabaja al mes. Se usa para dividir el costo fijo mensual en un costo diario.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </Label>
+                    <div className="relative">
+                      <CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                      <Input
+                        type="number"
+                        value={diasLaborables}
+                        onChange={(e) => setDiasLaborables(e.target.value)}
+                        min={1}
+                        max={31}
+                        className="pl-10"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Generalmente entre 20 y 22 días
+                    </p>
+                  </div>
+                </div>
 
-      {/* Allowed Emails Management */}
-      <AllowedEmailsSection />
-    </div>
+                {/* Daily cost result */}
+                <div className="rounded-lg border bg-muted/50 p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Costo Fijo Diario (calculado)</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        = Costo Mensual ÷ Días Laborables
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-2xl font-bold tabular-nums">
+                        {formatCurrency(preview.costoDiario)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">por día de obra</p>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* ── Section: Margen y Cargas ────────────────── */}
+            <Card className="border-green-200 dark:border-green-900">
+              <CardHeader className="pb-4">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5 text-green-600" />
+                      Margen de Ganancia y Cargas
+                    </CardTitle>
+                    <CardDescription className="mt-1">
+                      Margen deseado sobre el costo total y cargas sociales sobre mano de obra
+                    </CardDescription>
+                  </div>
+                  <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50 dark:bg-green-950 shrink-0">
+                    <Calculator className="h-3 w-3 mr-1" />
+                    Alimenta al Cotizador
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-1.5 font-medium">
+                      Margen de Ganancia / Ahorro
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[280px]">
+                          <p>Porcentaje de ganancia o ahorro que se agrega sobre el costo base (materiales + mano de obra + costos fijos) en cada cotización.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </Label>
+                    <div className="relative">
+                      <Percent className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={defaultMargin}
+                        onChange={(e) => setDefaultMargin(e.target.value)}
+                        min={0}
+                        max={100}
+                        className="pl-10"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Se aplica sobre el subtotal de cada cotización
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-1.5 font-medium">
+                      Cargas Sociales
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[280px]">
+                          <p>Porcentaje adicional sobre el costo de mano de obra para cubrir aportes patronales, ART, etc.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </Label>
+                    <div className="relative">
+                      <Percent className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={cargasSociales}
+                        onChange={(e) => setCargasSociales(e.target.value)}
+                        min={0}
+                        max={100}
+                        className="pl-10"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Aportes patronales, ART, etc.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* ── Preview Panel ──────────────────────────── */}
+          <div className="lg:col-span-1">
+            <Card className="sticky top-4 border-amber-200 dark:border-amber-900">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Calculator className="h-5 w-5 text-amber-600" />
+                  Vista Previa del Cotizador
+                </CardTitle>
+                <CardDescription>
+                  Ejemplo simulado: trabajo de {preview.ejemplo.m2}m² · {preview.ejemplo.dias} días
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Materiales</span>
+                    <span className="font-medium tabular-nums">{formatCurrency(preview.ejemplo.materiales)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground flex items-center gap-1">
+                      Mano de Obra
+                      {Number(cargasSociales) > 0 && (
+                        <span className="text-[10px] text-orange-600">(+{cargasSociales}% cargas)</span>
+                      )}
+                    </span>
+                    <span className="font-medium tabular-nums">{formatCurrency(preview.ejemplo.manoObra)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground flex items-center gap-1">
+                      Costos Fijos
+                      <span className="text-[10px] text-blue-600">
+                        ({preview.ejemplo.dias}d × {formatCurrency(preview.costoDiario)})
+                      </span>
+                    </span>
+                    <span className="font-medium tabular-nums">{formatCurrency(preview.ejemplo.fijos)}</span>
+                  </div>
+
+                  <Separator />
+
+                  <div className="flex justify-between font-medium">
+                    <span>Subtotal (costo)</span>
+                    <span className="tabular-nums">{formatCurrency(preview.ejemplo.subtotal)}</span>
+                  </div>
+
+                  {Number(defaultMargin) > 0 && (
+                    <div className="flex justify-between text-green-600">
+                      <span className="flex items-center gap-1">
+                        <TrendingUp className="h-3 w-3" />
+                        Margen ({defaultMargin}%)
+                      </span>
+                      <span className="font-medium tabular-nums">+{formatCurrency(preview.ejemplo.margen)}</span>
+                    </div>
+                  )}
+
+                  <Separator />
+
+                  <div className="flex justify-between text-base font-bold">
+                    <span>Total al Cliente</span>
+                    <span className="tabular-nums text-blue-600">{formatCurrency(preview.ejemplo.total)}</span>
+                  </div>
+                </div>
+
+                {/* Flow diagram */}
+                <div className="mt-4 rounded-lg bg-muted/50 p-3 space-y-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Cómo se calcula</p>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className="rounded bg-blue-100 dark:bg-blue-900 px-1.5 py-0.5 font-medium text-blue-700 dark:text-blue-300">Costo Mensual</span>
+                    <span>÷</span>
+                    <span className="rounded bg-blue-100 dark:bg-blue-900 px-1.5 py-0.5 font-medium text-blue-700 dark:text-blue-300">Días Lab.</span>
+                    <span>=</span>
+                    <span className="rounded bg-amber-100 dark:bg-amber-900 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-300">$/día</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className="rounded bg-amber-100 dark:bg-amber-900 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-300">$/día</span>
+                    <span>×</span>
+                    <span className="text-foreground font-medium">días obra</span>
+                    <span>=</span>
+                    <span className="rounded bg-purple-100 dark:bg-purple-900 px-1.5 py-0.5 font-medium text-purple-700 dark:text-purple-300">Fijos en cotiz.</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap">
+                    <span className="text-foreground font-medium">(Mat + MO + Fijos)</span>
+                    <span>×</span>
+                    <span className="rounded bg-green-100 dark:bg-green-900 px-1.5 py-0.5 font-medium text-green-700 dark:text-green-300">1 + Margen%</span>
+                    <span>=</span>
+                    <span className="rounded bg-blue-600 px-1.5 py-0.5 font-bold text-white">Precio Final</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* ── Save Button ──────────────────────────────── */}
+        <div className="flex justify-end">
+          <Button onClick={handleSave} disabled={saving} size="lg" className="min-w-[200px]">
+            {saving ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
+            )}
+            {saving ? "Guardando..." : "Guardar Configuración"}
+          </Button>
+        </div>
+
+        {/* Allowed Emails Management */}
+        <AllowedEmailsSection />
+      </div>
+    </TooltipProvider>
   );
 }
 
