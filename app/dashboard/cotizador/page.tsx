@@ -223,7 +223,7 @@ export default function CotizadorPage() {
         costo_mano_obra: 0,
         costo_fijos_prorrateados: 0,
         subtotal: 0,
-        m2: null,
+        m2: 1,
         unidad: "m2",
         dias_estimados: null,
         service_type_id: null,
@@ -871,8 +871,8 @@ export default function CotizadorPage() {
                                   )
                                 }
                                 placeholder="Descripcion del rubro"
-                                rows={1}
-                                className="resize-none max-h-16 overflow-y-auto min-h-[2.5rem]"
+                                rows={2}
+                                className="resize-none max-h-40 overflow-y-auto min-h-[2.5rem]"
                               />
                             </div>
                           </div>
@@ -893,7 +893,7 @@ export default function CotizadorPage() {
                                       : null
                                   )
                                 }
-                                placeholder="0"
+                                placeholder="1"
                               />
                             </div>
                             <div className="space-y-1.5">
