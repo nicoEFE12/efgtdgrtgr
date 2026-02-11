@@ -32,6 +32,7 @@ import {
   Circle,
   History,
   Printer,
+  Eye,
 } from "lucide-react";
 import jsPDF from 'jspdf';
 import { Button } from "@/components/ui/button";
@@ -1527,10 +1528,86 @@ function ProjectDocuments({ projectId }: { projectId: number }) {
   const [uploading, setUploading] = useState(false);
   const [category, setCategory] = useState("complementario");
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ url: string; filename: string } | null>(null);
+  const [imageZoom, setImageZoom] = useState(1);
+  const [imagePan, setImagePan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const handleImageClose = () => {
+    setPreviewImage(null);
+    setImageZoom(1);
+    setImagePan({ x: 0, y: 0 });
+  };
+
+  const handleMouseWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    setImageZoom((prev) => Math.max(1, Math.min(prev + delta, 4)));
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsDragging(true);
+    setDragStart({ x: e.clientX - imagePan.x, y: e.clientY - imagePan.y });
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    setImagePan({
+      x: e.clientX - dragStart.x,
+      y: e.clientY - dragStart.y,
+    });
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      // Pinch zoom
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const distance = Math.hypot(
+        touch2.clientX - touch1.clientX,
+        touch2.clientY - touch1.clientY
+      );
+      setDragStart({ x: distance, y: 0 });
+    } else if (e.touches.length === 1) {
+      // Pan
+      setIsDragging(true);
+      setDragStart({ x: e.touches[0].clientX - imagePan.x, y: e.touches[0].clientY - imagePan.y });
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      // Pinch zoom
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const distance = Math.hypot(
+        touch2.clientX - touch1.clientX,
+        touch2.clientY - touch1.clientY
+      );
+      const scale = distance / dragStart.x;
+      setImageZoom((prev) => Math.max(1, Math.min(prev * scale, 4)));
+      setDragStart({ x: distance, y: 0 });
+    } else if (e.touches.length === 1 && isDragging) {
+      // Pan
+      setImagePan({
+        x: e.touches[0].clientX - dragStart.x,
+        y: e.touches[0].clientY - dragStart.y,
+      });
+    }
+  };
+
+  const handleTouchEnd = () => {
+    setIsDragging(false);
+  };
 
   if (!mounted) {
     return (
@@ -1538,6 +1615,10 @@ function ProjectDocuments({ projectId }: { projectId: number }) {
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
+  }
+
+  function isImage(mimeType: string | null): boolean {
+    return mimeType ? mimeType.startsWith("image/") : false;
   }
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1688,6 +1769,16 @@ function ProjectDocuments({ projectId }: { projectId: number }) {
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
+                    {isImage(doc.mime_type) && (
+                      <Button 
+                        variant="ghost" 
+                        size="icon"
+                        onClick={() => setPreviewImage({ url: doc.url, filename: doc.filename })}
+                        title="Ver imagen"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    )}
                     <Button variant="ghost" size="icon" asChild>
                       <a
                         href={doc.url}
@@ -1718,6 +1809,78 @@ function ProjectDocuments({ projectId }: { projectId: number }) {
           )}
         </div>
       )}
+
+      {/* Image Preview Modal */}
+      <Dialog open={previewImage !== null} onOpenChange={handleImageClose}>
+        <DialogContent className="max-w-5xl w-[95vw] h-[90vh] p-0 border-0 bg-black/90 flex flex-col">
+          <DialogHeader className="flex-shrink-0 p-4 border-b border-white/10">
+            <DialogTitle className="text-white text-sm truncate pr-8">{previewImage?.filename}</DialogTitle>
+            <p className="text-xs text-white/60 mt-1">
+              Zoom: {(imageZoom * 100).toFixed(0)}% | Usa la rueda del mouse o pinch para zoom | Arrastra para mover
+            </p>
+          </DialogHeader>
+          <div 
+            className="flex-1 flex items-center justify-center overflow-hidden bg-black relative"
+            onWheel={handleMouseWheel}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          >
+            {previewImage && (
+              <img
+                src={previewImage.url}
+                alt={previewImage.filename}
+                className="select-none"
+                style={{
+                  transform: `translate(${imagePan.x}px, ${imagePan.y}px) scale(${imageZoom})`,
+                  transition: isDragging ? 'none' : 'transform 0.1s ease-out',
+                  cursor: isDragging ? 'grabbing' : 'grab',
+                  maxWidth: '100%',
+                  maxHeight: '100%',
+                  objectFit: 'contain',
+                }}
+                draggable={false}
+              />
+            )}
+          </div>
+          <div className="flex-shrink-0 flex items-center justify-between gap-2 p-4 border-t border-white/10">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setImageZoom(1);
+                setImagePan({ x: 0, y: 0 });
+              }}
+              className="bg-white/10 border-white/20 text-white hover:bg-white/20"
+            >
+              Reiniciar
+            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setImageZoom((prev) => Math.max(1, prev - 0.2))}
+                className="bg-white/10 border-white/20 text-white hover:bg-white/20"
+              >
+                −
+              </Button>
+              <span className="text-white text-sm min-w-16 text-center">{(imageZoom * 100).toFixed(0)}%</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setImageZoom((prev) => Math.min(4, prev + 0.2))}
+                className="bg-white/10 border-white/20 text-white hover:bg-white/20"
+              >
+                +
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
