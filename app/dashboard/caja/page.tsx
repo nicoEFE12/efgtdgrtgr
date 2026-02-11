@@ -140,26 +140,10 @@ export default function CajaPage() {
         title="Caja General"
         description="Tesorería - Flujo de caja general"
       />
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div />
-        <div className="flex gap-2">
-          <Button
-            onClick={() => openDialog("ingreso")}
-            className="bg-accent text-accent-foreground hover:bg-accent/90"
-          >
-            <ArrowDownCircle className="mr-2 h-4 w-4" />
-            Ingreso
-          </Button>
-          <Button variant="destructive" onClick={() => openDialog("egreso")}>
-            <ArrowUpCircle className="mr-2 h-4 w-4" />
-            Egreso
-          </Button>
-        </div>
-      </div>
 
       {/* Total */}
       <Card className="border-primary/20 bg-primary/5">
-        <CardContent className="flex items-center justify-between p-5">
+        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-medium text-muted-foreground">
               Total Disponible en Caja
@@ -169,6 +153,19 @@ export default function CajaPage() {
             >
               {formatCurrency(totalCaja)}
             </p>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              onClick={() => openDialog("ingreso")}
+              className="bg-accent text-accent-foreground hover:bg-accent/90"
+            >
+              <ArrowDownCircle className="mr-2 h-4 w-4" />
+              Ingreso
+            </Button>
+            <Button variant="destructive" onClick={() => openDialog("egreso")}>
+              <ArrowUpCircle className="mr-2 h-4 w-4" />
+              Egreso
+            </Button>
           </div>
         </CardContent>
       </Card>

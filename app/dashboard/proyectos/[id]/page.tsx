@@ -1529,6 +1529,7 @@ function ProjectDocuments({ projectId }: { projectId: number }) {
   const [category, setCategory] = useState("complementario");
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [previewImage, setPreviewImage] = useState<{ url: string; filename: string } | null>(null);
+  const [previewPdf, setPreviewPdf] = useState<{ url: string; filename: string } | null>(null);
   const [imageZoom, setImageZoom] = useState(1);
   const [imagePan, setImagePan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -1619,6 +1620,10 @@ function ProjectDocuments({ projectId }: { projectId: number }) {
 
   function isImage(mimeType: string | null): boolean {
     return mimeType ? mimeType.startsWith("image/") : false;
+  }
+
+  function isPdf(mimeType: string | null): boolean {
+    return mimeType === "application/pdf";
   }
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1779,6 +1784,16 @@ function ProjectDocuments({ projectId }: { projectId: number }) {
                         <Eye className="h-4 w-4" />
                       </Button>
                     )}
+                    {isPdf(doc.mime_type) && (
+                      <Button 
+                        variant="ghost" 
+                        size="icon"
+                        onClick={() => setPreviewPdf({ url: doc.url, filename: doc.filename })}
+                        title="Ver PDF"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    )}
                     <Button variant="ghost" size="icon" asChild>
                       <a
                         href={doc.url}
@@ -1878,6 +1893,28 @@ function ProjectDocuments({ projectId }: { projectId: number }) {
                 +
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* PDF Preview Modal */}
+      <Dialog open={previewPdf !== null} onOpenChange={() => setPreviewPdf(null)}>
+        <DialogContent className="max-w-6xl w-[95vw] h-[95vh] p-0 border-0 bg-black/90 flex flex-col">
+          <DialogHeader className="flex-shrink-0 p-4 border-b border-white/10">
+            <DialogTitle className="text-white text-sm truncate pr-8">{previewPdf?.filename}</DialogTitle>
+            <p className="text-xs text-white/60 mt-1">
+              Visualizador de PDF | Usa los controles del navegador para navegar
+            </p>
+          </DialogHeader>
+          <div className="flex-1 overflow-hidden bg-white">
+            {previewPdf && (
+              <iframe
+                src={previewPdf.url}
+                className="w-full h-full"
+                title={previewPdf.filename}
+                style={{ border: 'none' }}
+              />
+            )}
           </div>
         </DialogContent>
       </Dialog>
