@@ -2,6 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 
+// Helper function to fix sequence if needed
+async function ensureSequenceFixed(sql: any) {
+  try {
+    const result = await sql`
+      SELECT setval('allowed_emails_id_seq', (SELECT COALESCE(MAX(id), 0) + 1 FROM allowed_emails))
+    `;
+    console.log("Sequence fixed:", result);
+  } catch (error) {
+    console.error("Could not fix sequence:", error);
+  }
+}
+
 // GET - List all allowed emails
 export async function GET() {
   try {
@@ -53,13 +65,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Este email ya está en la lista" }, { status: 409 });
     }
 
-    const result = await sql`
-      INSERT INTO allowed_emails (email, role)
-      VALUES (LOWER(${email}), ${role || "user"})
-      RETURNING id, email, role, created_at
-    `;
+    try {
+      const result = await sql`
+        INSERT INTO allowed_emails (email, role)
+        VALUES (LOWER(${email}), ${role || "user"})
+        RETURNING id, email, role, created_at
+      `;
 
-    return NextResponse.json(result[0], { status: 201 });
+      return NextResponse.json(result[0], { status: 201 });
+    } catch (insertError: any) {
+      // If it's a sequence issue, try to fix it and retry
+      if (insertError?.code === '23505' && insertError?.constraint === 'allowed_emails_pkey') {
+        console.error("Sequence issue detected. Attempting to fix...");
+        
+        // Try to fix the sequence
+        await ensureSequenceFixed(sql);
+        
+        // Retry the insert
+        try {
+          const retryResult = await sql`
+            INSERT INTO allowed_emails (email, role)
+            VALUES (LOWER(${email}), ${role || "user"})
+            RETURNING id, email, role, created_at
+          `;
+          console.log("Insert succeeded after fixing sequence");
+          return NextResponse.json(retryResult[0], { status: 201 });
+        } catch (retryError) {
+          console.error("Insert failed even after fixing sequence:", retryError);
+          return NextResponse.json({ 
+            error: "Error al guardar email. Por favor intenta nuevamente." 
+          }, { status: 500 });
+        }
+      }
+      throw insertError;
+    }
   } catch (error) {
     console.error("Error adding allowed email:", error);
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });
