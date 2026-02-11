@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   Upload,
   FileSpreadsheet,
@@ -73,6 +73,7 @@ export default function ImportPage() {
   const [columnMapping, setColumnMapping] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const columns = importType === "materials" ? MATERIAL_COLUMNS : SETTINGS_COLUMNS;
 
@@ -276,12 +277,13 @@ export default function ImportPage() {
                     o haz clic para seleccionar
                   </p>
                   <input
+                    ref={fileInputRef}
                     type="file"
                     accept=".xlsx,.xls"
                     onChange={handleFileInput}
-                    className="absolute inset-0 cursor-pointer opacity-0"
+                    className="hidden"
                   />
-                  <Button className="mt-4" variant="outline">
+                  <Button className="mt-4" variant="outline" onClick={() => fileInputRef.current?.click()}>
                     Seleccionar archivo
                   </Button>
                 </>
