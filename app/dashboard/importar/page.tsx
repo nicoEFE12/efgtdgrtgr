@@ -329,28 +329,45 @@ export default function ImportPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {previewData.rows.slice(0, 10).map((row, i) => (
-                    <TableRow key={i}>
-                      {previewData.headers.map((_, j) => (
-                        <TableCell key={j} className="max-w-[200px] truncate">
-                          {String((row as unknown[])[j] ?? "")}
-                        </TableCell>
-                      ))}
+                  {previewData.rows && previewData.rows.length > 0 ? (
+                    previewData.rows.slice(0, 10).map((row, rowIndex) => {
+                      const rowArray = Array.isArray(row) ? row : [];
+                      return (
+                        <TableRow key={rowIndex}>
+                          {previewData.headers.map((_, colIndex) => {
+                            const cellValue = rowArray[colIndex];
+                            const displayValue = cellValue !== null && cellValue !== undefined 
+                              ? String(cellValue) 
+                              : "";
+                            return (
+                              <TableCell key={colIndex} className="max-w-[200px] truncate">
+                                {displayValue}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      );
+                    })
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={previewData.headers.length} className="text-center text-muted-foreground">
+                        No se encontraron filas con datos
+                      </TableCell>
                     </TableRow>
-                  ))}
+                  )}
                 </TableBody>
               </Table>
             </div>
             {previewData.totalRows > 10 && (
               <p className="text-center text-sm text-muted-foreground">
-                Mostrando 10 de {previewData.totalRows} filas
+                Mostrando {Math.min(10, previewData.rows?.length || 0)} de {previewData.totalRows} filas
               </p>
             )}
             <div className="flex justify-between">
               <Button variant="outline" onClick={reset}>
                 Cancelar
               </Button>
-              <Button onClick={() => setStep("mapping")}>
+              <Button onClick={() => setStep("mapping")} disabled={!previewData.rows || previewData.rows.length === 0}>
                 Continuar al mapeo
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>

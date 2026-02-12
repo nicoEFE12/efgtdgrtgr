@@ -664,94 +664,207 @@ export default function CotizadorPage() {
       const { quotation: q } = await res.json();
       const pdf = new jsPDF();
       const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 20;
+      const contentWidth = pageWidth - (2 * margin);
       const company = settings.company_name || "Am Soluciones Constructivas";
       
-      // Header
-      pdf.setFontSize(20);
-      pdf.setTextColor(37, 99, 235);
-      pdf.text(company, 20, 25);
+      let currentPage = 1;
+
+      function addPageHeader(isFirstPage = false) {
+        // Header background
+        pdf.setFillColor(37, 99, 235);
+        pdf.rect(0, 0, pageWidth, 45, "F");
+        
+        // Company name
+        pdf.setFontSize(20);
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFont(undefined, 'bold');
+        pdf.text(company, margin, 18);
+        
+        // Document title
+        pdf.setFontSize(14);
+        pdf.setFont(undefined, 'normal');
+        pdf.text("PRESUPUESTO COMERCIAL", margin, 32);
+        
+        // Page number
+        pdf.setFontSize(9);
+        pdf.text(`Página ${currentPage}`, pageWidth - margin - 20, 38);
+        
+        pdf.setTextColor(0, 0, 0);
+      }
+
+      addPageHeader(true);
       
-      pdf.setFontSize(16);
+      let yPos = 55;
+
+      // Client info section
+      pdf.setFontSize(11);
+      pdf.setFont(undefined, 'bold');
+      pdf.setTextColor(60, 60, 60);
+      pdf.text("DATOS DEL PRESUPUESTO", margin, yPos);
+      yPos += 8;
+
+      pdf.setFont(undefined, 'normal');
+      pdf.setFontSize(10);
       pdf.setTextColor(0, 0, 0);
-      pdf.text("PRESUPUESTO", 20, 40);
+
+      // Info box with background
+      pdf.setFillColor(245, 247, 250);
+      pdf.rect(margin, yPos - 3, contentWidth, 28, "F");
       
-      pdf.setFontSize(12);
-      pdf.text(`Cliente: ${q.client_name || 'Cliente'}`, 20, 55);
-      pdf.text(`Proyecto: ${q.nombre}`, 20, 65);
-      pdf.text(`Fecha: ${new Date(q.created_at).toLocaleDateString('es-AR')}`, 20, 75);
+      pdf.text(`Cliente: ${q.client_name || 'Cliente'}`, margin + 5, yPos + 3);
+      pdf.text(`Proyecto: ${q.nombre}`, margin + 5, yPos + 10);
+      pdf.text(`Fecha: ${new Date(q.created_at).toLocaleDateString('es-AR')}`, margin + 5, yPos + 17);
       
+      yPos += 32;
+      
+      // Notes section
       if (q.notas) {
-        pdf.text("Condiciones:", 20, 85);
-        const notasLines = pdf.splitTextToSize(q.notas, pageWidth - 40);
-        pdf.text(notasLines, 20, 95);
+        pdf.setFont(undefined, 'bold');
+        pdf.setTextColor(60, 60, 60);
+        pdf.text("CONDICIONES:", margin, yPos);
+        yPos += 7;
+        
+        pdf.setFont(undefined, 'normal');
+        pdf.setFontSize(9);
+        pdf.setTextColor(80, 80, 80);
+        const notasLines = pdf.splitTextToSize(q.notas, contentWidth - 10);
+        pdf.text(notasLines, margin + 5, yPos);
+        yPos += (notasLines.length * 4) + 10;
       }
       
-      let yPos = q.notas ? 115 : 90;
+      // Items section title
+      pdf.setFontSize(11);
+      pdf.setFont(undefined, 'bold');
+      pdf.setTextColor(60, 60, 60);
+      pdf.text("RUBROS DEL PRESUPUESTO", margin, yPos);
+      yPos += 10;
       
       // Table header
-      pdf.setFontSize(10);
+      pdf.setDrawColor(37, 99, 235);
+      pdf.setLineWidth(0.5);
       pdf.setFillColor(37, 99, 235);
+      pdf.rect(margin, yPos - 2, contentWidth, 10, "FD");
+      
+      pdf.setFontSize(10);
+      pdf.setFont(undefined, 'bold');
       pdf.setTextColor(255, 255, 255);
-      pdf.rect(20, yPos, pageWidth - 40, 8, "F");
-      pdf.text("DESCRIPCIÓN", 25, yPos + 6);
-      pdf.text("CANT.", pageWidth - 80, yPos + 6);
-      pdf.text("PRECIO", pageWidth - 50, yPos + 6);
+      
+      pdf.text("DESCRIPCIÓN", margin + 3, yPos + 4);
+      pdf.text("CANT.", pageWidth - margin - 70, yPos + 4, { align: "right" });
+      pdf.text("PRECIO", pageWidth - margin - 5, yPos + 4, { align: "right" });
       
       yPos += 12;
-      pdf.setTextColor(0, 0, 0);
       
       // Items - calculate margin proportionally
       const costoTotal = Number(q.costo_total);
       const totalFinal = Number(q.total);
       const margenTotal = totalFinal - costoTotal;
       
+      pdf.setFont(undefined, 'normal');
+      pdf.setFontSize(9);
+      pdf.setTextColor(0, 0, 0);
+      let rowCount = 0;
+      
       q.items.forEach((item: any, index: number) => {
-        if (yPos > 250) {
-          pdf.addPage();
-          yPos = 30;
-        }
-        
         const cantidad = item.m2 || 1;
         const unidad = item.unidad || "m2";
         const subtotal = Number(item.subtotal);
+        const desc = item.descripcion || `Rubro ${index + 1}`;
+        const descLines = pdf.splitTextToSize(desc, contentWidth - 85);
+        const rowHeight = Math.max(descLines.length * 4.5, 8);
         
         // Distribute margin proportionally
         const margenItem = costoTotal > 0 ? (subtotal / costoTotal) * margenTotal : 0;
         const precioFinal = subtotal + margenItem;
         
-        // Description
-        const desc = item.descripcion || `Rubro ${index + 1}`;
-        const descLines = pdf.splitTextToSize(desc, pageWidth - 120);
-        pdf.text(descLines, 25, yPos + 4);
+        // Check if we need a new page
+        if (yPos + rowHeight + 5 > pageHeight - 35) {
+          pdf.addPage();
+          currentPage++;
+          addPageHeader();
+          yPos = 60;
+          
+          // Re-add table header
+          pdf.setFillColor(37, 99, 235);
+          pdf.rect(margin, yPos - 2, contentWidth, 10, "FD");
+          pdf.setFontSize(10);
+          pdf.setFont(undefined, 'bold');
+          pdf.setTextColor(255, 255, 255);
+          pdf.text("DESCRIPCIÓN", margin + 3, yPos + 4);
+          pdf.text("CANT.", pageWidth - margin - 70, yPos + 4, { align: "right" });
+          pdf.text("PRECIO", pageWidth - margin - 5, yPos + 4, { align: "right" });
+          yPos += 12;
+          
+          pdf.setFont(undefined, 'normal');
+          pdf.setFontSize(9);
+          pdf.setTextColor(0, 0, 0);
+          rowCount = 0;
+        }
         
-        // Quantity
-        pdf.text(`${cantidad} ${unidad}`, pageWidth - 80, yPos + 4, { align: "right" });
+        // Alternate row background
+        if (rowCount % 2 === 0) {
+          pdf.setFillColor(248, 250, 252);
+          pdf.rect(margin, yPos - 2, contentWidth, rowHeight, "F");
+        }
         
-        // Price
-        pdf.text(`$${Math.round(precioFinal).toLocaleString('es-AR')}`, pageWidth - 30, yPos + 4, { align: "right" });
+        // Draw borders
+        pdf.setDrawColor(220, 220, 225);
+        pdf.setLineWidth(0.1);
+        pdf.rect(margin, yPos - 2, contentWidth, rowHeight);
         
-        yPos += Math.max(descLines.length * 5, 8) + 2;
+        // Content
+        pdf.text(descLines, margin + 3, yPos + 2);
+        pdf.text(`${cantidad} ${unidad}`, pageWidth - margin - 70, yPos + 2, { align: "right" });
+        pdf.text(`$${Math.round(precioFinal).toLocaleString('es-AR')}`, pageWidth - margin - 5, yPos + 2, { align: "right" });
+        
+        yPos += rowHeight;
+        rowCount++;
       });
       
-      // Total
-      yPos += 10;
-      pdf.setFontSize(12);
-      pdf.setFillColor(240, 240, 240);
-      pdf.rect(20, yPos, pageWidth - 40, 10, "F");
-      pdf.setFont(undefined, "bold");
-      pdf.text(`TOTAL: $${Math.round(totalFinal).toLocaleString('es-AR')}`, pageWidth - 30, yPos + 7, { align: "right" });
+      // Total section
+      yPos += 8;
       
-      // Footer
-      pdf.setFontSize(8);
-      pdf.setFont(undefined, "normal");
-      pdf.setTextColor(128, 128, 128);
-      yPos += 25;
-      if (yPos > 270) {
+      // Check if total fits
+      if (yPos + 15 > pageHeight - 20) {
         pdf.addPage();
-        yPos = 30;
+        currentPage++;
+        addPageHeader();
+        yPos = 60;
       }
-      pdf.text("Presupuesto válido por 30 días.", 20, yPos);
-      pdf.text("Gracias por confiar en nosotros.", 20, yPos + 10);
+      
+      pdf.setDrawColor(37, 99, 235);
+      pdf.setLineWidth(0.5);
+      pdf.setFillColor(37, 99, 235);
+      pdf.rect(margin, yPos, contentWidth, 12, "FD");
+      
+      pdf.setFontSize(13);
+      pdf.setFont(undefined, 'bold');
+      pdf.setTextColor(255, 255, 255);
+      pdf.text(`TOTAL: $${Math.round(totalFinal).toLocaleString('es-AR')}`, pageWidth - margin - 5, yPos + 8, { align: "right" });
+      
+      yPos += 20;
+      
+      // Footer section
+      if (yPos + 25 > pageHeight - 15) {
+        pdf.addPage();
+        currentPage++;
+        addPageHeader();
+        yPos = 60;
+      }
+      
+      pdf.setFontSize(9);
+      pdf.setFont(undefined, 'normal');
+      pdf.setTextColor(100, 100, 100);
+      pdf.text("• Presupuesto válido por 30 días.", margin, yPos + 5);
+      pdf.text("• Los precios incluyen materiales y mano de obra.", margin, yPos + 11);
+      pdf.text("• Gracias por confiar en nosotros.", margin, yPos + 17);
+      
+      // Final footer
+      pdf.setFontSize(8);
+      pdf.setTextColor(150, 150, 150);
+      pdf.text(company, pageWidth / 2, pageHeight - 10, { align: "center" });
       
       pdf.save(`presupuesto-${q.nombre.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
       toast.success("Presupuesto comercial descargado");
@@ -771,84 +884,177 @@ export default function CotizadorPage() {
       const { quotation: q } = await res.json();
       const pdf = new jsPDF();
       const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 20;
+      const contentWidth = pageWidth - (2 * margin);
       const company = settings.company_name || "Am Soluciones Constructivas";
       
-      // Header
-      pdf.setFontSize(20);
-      pdf.setTextColor(37, 99, 235);
-      pdf.text(company, 20, 25);
+      let currentPage = 1;
+
+      function addPageHeader(isFirstPage = false) {
+        // Header background
+        pdf.setFillColor(37, 99, 235);
+        pdf.rect(0, 0, pageWidth, 45, "F");
+        
+        // Company name
+        pdf.setFontSize(20);
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFont(undefined, 'bold');
+        pdf.text(company, margin, 18);
+        
+        // Document title
+        pdf.setFontSize(14);
+        pdf.setFont(undefined, 'normal');
+        pdf.text("PRESUPUESTO TÉCNICO INTERNO", margin, 32);
+        
+        // Page number
+        pdf.setFontSize(9);
+        pdf.text(`Página ${currentPage}`, pageWidth - margin - 20, 38);
+        
+        pdf.setTextColor(0, 0, 0);
+      }
+
+      addPageHeader(true);
       
-      pdf.setFontSize(16);
-      pdf.setTextColor(0, 0, 0);
-      pdf.text("PRESUPUESTO TÉCNICO", 20, 40);
-      
-      pdf.setFontSize(12);
-      pdf.text(`Proyecto: ${q.nombre}`, 20, 55);
-      pdf.text(`Fecha: ${new Date(q.created_at).toLocaleDateString('es-AR')}`, 20, 65);
-      
-      let yPos = 80;
-      
-      // Cost breakdown
-      pdf.setFontSize(14);
-      pdf.setFont(undefined, "bold");
-      pdf.text("DESGLOSE DE COSTOS", 20, yPos);
-      yPos += 15;
-      
+      let yPos = 55;
+
+      // Project info section
+      pdf.setFontSize(11);
+      pdf.setFont(undefined, 'bold');
+      pdf.setTextColor(60, 60, 60);
+      pdf.text("INFORMACIÓN DEL PROYECTO", margin, yPos);
+      yPos += 8;
+
+      pdf.setFont(undefined, 'normal');
       pdf.setFontSize(10);
-      pdf.setFont(undefined, "normal");
+      pdf.setTextColor(0, 0, 0);
+
+      // Info box with background
+      pdf.setFillColor(245, 247, 250);
+      pdf.rect(margin, yPos - 3, contentWidth, 18, "F");
+      
+      pdf.text(`Proyecto: ${q.nombre}`, margin + 5, yPos + 3);
+      pdf.text(`Fecha: ${new Date(q.created_at).toLocaleDateString('es-AR')}`, margin + 5, yPos + 10);
+      
+      yPos += 25;
+      
+      // Cost breakdown section
+      pdf.setFontSize(11);
+      pdf.setFont(undefined, 'bold');
+      pdf.setTextColor(60, 60, 60);
+      pdf.text("DESGLOSE DE COSTOS POR RUBRO", margin, yPos);
+      yPos += 12;
+      
+      pdf.setFont(undefined, 'normal');
+      pdf.setFontSize(9);
       
       q.items.forEach((item: any, index: number) => {
-        if (yPos > 240) {
+        const desc = item.descripcion || `Rubro ${index + 1}`;
+        
+        // Calculate space needed for this item (header + 4 lines of costs)
+        const itemHeight = 30;
+        
+        // Check if we need a new page
+        if (yPos + itemHeight > pageHeight - 35) {
           pdf.addPage();
-          yPos = 30;
+          currentPage++;
+          addPageHeader();
+          yPos = 60;
         }
         
-        pdf.setFont(undefined, "bold");
-        pdf.text(`${index + 1}. ${item.descripcion || `Rubro ${index + 1}`}`, 20, yPos);
-        yPos += 8;
+        // Item box background
+        pdf.setFillColor(248, 250, 252);
+        pdf.setDrawColor(200, 210, 220);
+        pdf.setLineWidth(0.3);
+        pdf.rect(margin, yPos, contentWidth, itemHeight, "FD");
         
-        pdf.setFont(undefined, "normal");
-        pdf.text(`   Cantidad: ${item.m2 || 1} ${item.unidad || 'm2'}`, 25, yPos);
-        yPos += 5;
-        pdf.text(`   Materiales: $${Math.round(Number(item.costo_materiales)).toLocaleString('es-AR')}`, 25, yPos);
-        yPos += 5;
-        pdf.text(`   Mano de obra: $${Math.round(Number(item.costo_mano_obra)).toLocaleString('es-AR')}`, 25, yPos);
-        yPos += 5;
-        pdf.text(`   Costos fijos: $${Math.round(Number(item.costo_fijos_prorrateados)).toLocaleString('es-AR')}`, 25, yPos);
-        yPos += 5;
-        pdf.setFont(undefined, "bold");
-        pdf.text(`   Subtotal: $${Math.round(Number(item.subtotal)).toLocaleString('es-AR')}`, 25, yPos);
-        yPos += 10;
+        // Item title
+        pdf.setFont(undefined, 'bold');
+        pdf.setFontSize(10);
+        pdf.setTextColor(37, 99, 235);
+        const itemTitle = `${index + 1}. ${desc}`;
+        const titleLines = pdf.splitTextToSize(itemTitle, contentWidth - 10);
+        pdf.text(titleLines, margin + 5, yPos + 6);
+        
+        // Item details
+        pdf.setFont(undefined, 'normal');
+        pdf.setFontSize(9);
+        pdf.setTextColor(0, 0, 0);
+        
+        const detailsY = yPos + 6 + (titleLines.length * 4) + 2;
+        pdf.text(`Cantidad: ${item.m2 || 1} ${item.unidad || 'm2'}`, margin + 10, detailsY);
+        pdf.text(`Materiales: $${Math.round(Number(item.costo_materiales)).toLocaleString('es-AR')}`, margin + 10, detailsY + 5);
+        pdf.text(`Mano de obra: $${Math.round(Number(item.costo_mano_obra)).toLocaleString('es-AR')}`, margin + 10, detailsY + 10);
+        pdf.text(`Costos fijos: $${Math.round(Number(item.costo_fijos_prorrateados)).toLocaleString('es-AR')}`, margin + 10, detailsY + 15);
+        
+        // Subtotal (aligned right)
+        pdf.setFont(undefined, 'bold');
+        pdf.setTextColor(37, 99, 235);
+        pdf.text(`Subtotal: $${Math.round(Number(item.subtotal)).toLocaleString('es-AR')}`, pageWidth - margin - 5, detailsY + 15, { align: "right" });
+        
+        yPos += itemHeight + 5;
       });
       
-      // Summary
+      // Summary section
       yPos += 15;
-      if (yPos > 250) {
+      
+      // Check if summary fits
+      if (yPos + 50 > pageHeight - 20) {
         pdf.addPage();
-        yPos = 30;
+        currentPage++;
+        addPageHeader();
+        yPos = 60;
       }
       
-      pdf.setFontSize(12);
-      pdf.setFont(undefined, "bold");
-      pdf.text("RESUMEN FINANCIERO", 20, yPos);
+      pdf.setFontSize(11);
+      pdf.setFont(undefined, 'bold');
+      pdf.setTextColor(60, 60, 60);
+      pdf.text("RESUMEN FINANCIERO", margin, yPos);
       yPos += 10;
       
-      pdf.setFont(undefined, "normal");
+      // Summary box
       const costoTotal = Number(q.costo_total);
       const totalFinal = Number(q.total);
       const margenTotal = totalFinal - costoTotal;
       
-      pdf.text(`Costo base: $${Math.round(costoTotal).toLocaleString('es-AR')}`, 20, yPos);
+      pdf.setFillColor(245, 247, 250);
+      pdf.setDrawColor(200, 210, 220);
+      pdf.setLineWidth(0.3);
+      
+      let summaryHeight = 25;
+      if (margenTotal > 0) summaryHeight += 8;
+      
+      pdf.rect(margin, yPos, contentWidth, summaryHeight, "FD");
+      
+      pdf.setFont(undefined, 'normal');
+      pdf.setFontSize(10);
+      pdf.setTextColor(0, 0, 0);
+      
+      yPos += 8;
+      pdf.text(`Costo base:`, margin + 5, yPos);
+      pdf.text(`$${Math.round(costoTotal).toLocaleString('es-AR')}`, pageWidth - margin - 5, yPos, { align: "right" });
       yPos += 8;
       
       if (margenTotal > 0) {
         const porcentajeMargen = costoTotal > 0 ? ((margenTotal / costoTotal) * 100).toFixed(1) : "0";
-        pdf.text(`Margen (${porcentajeMargen}%): $${Math.round(margenTotal).toLocaleString('es-AR')}`, 20, yPos);
+        pdf.text(`Margen (${porcentajeMargen}%):`, margin + 5, yPos);
+        pdf.text(`$${Math.round(margenTotal).toLocaleString('es-AR')}`, pageWidth - margin - 5, yPos, { align: "right" });
         yPos += 8;
       }
       
-      pdf.setFont(undefined, "bold");
-      pdf.text(`TOTAL: $${Math.round(totalFinal).toLocaleString('es-AR')}`, 20, yPos);
+      // Total with highlighted background
+      pdf.setFillColor(37, 99, 235);
+      pdf.rect(margin, yPos - 3, contentWidth, 10, "F");
+      pdf.setFont(undefined, 'bold');
+      pdf.setFontSize(12);
+      pdf.setTextColor(255, 255, 255);
+      pdf.text(`TOTAL:`, margin + 5, yPos + 4);
+      pdf.text(`$${Math.round(totalFinal).toLocaleString('es-AR')}`, pageWidth - margin - 5, yPos + 4, { align: "right" });
+      
+      // Final footer
+      pdf.setFontSize(8);
+      pdf.setTextColor(150, 150, 150);
+      pdf.text(`${company} - Documento Interno`, pageWidth / 2, pageHeight - 10, { align: "center" });
       
       pdf.save(`presupuesto-tecnico-${q.nombre.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
       toast.success("Presupuesto técnico descargado");
@@ -865,86 +1071,204 @@ export default function CotizadorPage() {
 
     const pdf = new jsPDF();
     const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 20;
+    const contentWidth = pageWidth - (2 * margin);
     const company = settings.company_name || "Am Soluciones Constructivas";
     const clientName = clientId ? clientsList.find(c => c.id.toString() === clientId)?.apellido_nombre || "Cliente" : "Cliente";
     
-    // Header
-    pdf.setFontSize(20);
-    pdf.setTextColor(37, 99, 235); // rgb(37,99,235)
-    pdf.text(company, 20, 25);
+    let currentPage = 1;
+
+    function addPageHeader(isFirstPage = false) {
+      // Header background
+      pdf.setFillColor(37, 99, 235);
+      pdf.rect(0, 0, pageWidth, 45, "F");
+      
+      // Company name
+      pdf.setFontSize(20);
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFont(undefined, 'bold');
+      pdf.text(company, margin, 18);
+      
+      // Document title
+      pdf.setFontSize(14);
+      pdf.setFont(undefined, 'normal');
+      pdf.text("PRESUPUESTO COMERCIAL", margin, 32);
+      
+      // Page number
+      pdf.setFontSize(9);
+      pdf.text(`Página ${currentPage}`, pageWidth - margin - 20, 38);
+      
+      pdf.setTextColor(0, 0, 0);
+    }
+
+    addPageHeader(true);
     
-    pdf.setFontSize(16);
+    let yPos = 55;
+
+    // Client info section
+    pdf.setFontSize(11);
+    pdf.setFont(undefined, 'bold');
+    pdf.setTextColor(60, 60, 60);
+    pdf.text("DATOS DEL PRESUPUESTO", margin, yPos);
+    yPos += 8;
+
+    pdf.setFont(undefined, 'normal');
+    pdf.setFontSize(10);
     pdf.setTextColor(0, 0, 0);
-    pdf.text("PRESUPUESTO", 20, 40);
+
+    // Info box with background
+    pdf.setFillColor(245, 247, 250);
+    pdf.rect(margin, yPos - 3, contentWidth, 28, "F");
     
-    pdf.setFontSize(12);
-    pdf.text(`Cliente: ${clientName}`, 20, 55);
-    pdf.text(`Proyecto: ${nombre}`, 20, 65);
-    pdf.text(`Fecha: ${new Date().toLocaleDateString('es-AR')}`, 20, 75);
+    pdf.text(`Cliente: ${clientName}`, margin + 5, yPos + 3);
+    pdf.text(`Proyecto: ${nombre}`, margin + 5, yPos + 10);
+    pdf.text(`Fecha: ${new Date().toLocaleDateString('es-AR')}`, margin + 5, yPos + 17);
     
+    yPos += 32;
+    
+    // Notes section
     if (notas) {
-      pdf.text("Condiciones:", 20, 85);
-      const notasLines = pdf.splitTextToSize(notas, pageWidth - 40);
-      pdf.text(notasLines, 20, 95);
+      pdf.setFont(undefined, 'bold');
+      pdf.setTextColor(60, 60, 60);
+      pdf.text("CONDICIONES:", margin, yPos);
+      yPos += 7;
+      
+      pdf.setFont(undefined, 'normal');
+      pdf.setFontSize(9);
+      pdf.setTextColor(80, 80, 80);
+      const notasLines = pdf.splitTextToSize(notas, contentWidth - 10);
+      pdf.text(notasLines, margin + 5, yPos);
+      yPos += (notasLines.length * 4) + 10;
     }
     
-    let yPos = notas ? 115 : 90;
+    // Items section title
+    pdf.setFontSize(11);
+    pdf.setFont(undefined, 'bold');
+    pdf.setTextColor(60, 60, 60);
+    pdf.text("RUBROS DEL PRESUPUESTO", margin, yPos);
+    yPos += 10;
     
     // Table header
-    pdf.setFontSize(10);
+    pdf.setDrawColor(37, 99, 235);
+    pdf.setLineWidth(0.5);
     pdf.setFillColor(37, 99, 235);
+    pdf.rect(margin, yPos - 2, contentWidth, 10, "FD");
+    
+    pdf.setFontSize(10);
+    pdf.setFont(undefined, 'bold');
     pdf.setTextColor(255, 255, 255);
-    pdf.rect(20, yPos, pageWidth - 40, 8, "F");
-    pdf.text("DESCRIPCIÓN", 25, yPos + 6);
-    pdf.text("CANT.", pageWidth - 80, yPos + 6);
-    pdf.text("PRECIO", pageWidth - 50, yPos + 6);
+    
+    pdf.text("DESCRIPCIÓN", margin + 3, yPos + 4);
+    pdf.text("CANT.", pageWidth - margin - 70, yPos + 4, { align: "right" });
+    pdf.text("PRECIO", pageWidth - margin - 5, yPos + 4, { align: "right" });
     
     yPos += 12;
-    pdf.setTextColor(0, 0, 0);
     
     // Items
+    pdf.setFont(undefined, 'normal');
+    pdf.setFontSize(9);
+    pdf.setTextColor(0, 0, 0);
+    let rowCount = 0;
+    
     items.forEach((item, index) => {
-      if (yPos > 250) {
-        pdf.addPage();
-        yPos = 30;
-      }
-      
       const cantidad = item.m2 || 1;
       const unidad = item.unidad || "m2";
-      
-      // Description
       const desc = item.descripcion || `Rubro ${index + 1}`;
-      const descLines = pdf.splitTextToSize(desc, pageWidth - 120);
-      pdf.text(descLines, 25, yPos + 4);
+      const descLines = pdf.splitTextToSize(desc, contentWidth - 85);
+      const precio = item.subtotal + (applyMargin ? item.subtotal * (margenGanancia / 100) : 0);
       
-      // Quantity
-      pdf.text(`${cantidad} ${unidad}`, pageWidth - 80, yPos + 4, { align: "right" });
+      // Calculate row height needed
+      const rowHeight = Math.max(descLines.length * 4.5, 8);
       
-      // Price
-      pdf.text(`$${formatMoney(item.subtotal + (applyMargin ? item.subtotal * (margenGanancia / 100) : 0))}`, pageWidth - 30, yPos + 4, { align: "right" });
+      // Check if we need a new page (with some margin for safety)
+      if (yPos + rowHeight + 5 > pageHeight - 35) {
+        pdf.addPage();
+        currentPage++;
+        addPageHeader();
+        yPos = 60;
+        
+        // Re-add table header
+        pdf.setFillColor(37, 99, 235);
+        pdf.rect(margin, yPos - 2, contentWidth, 10, "FD");
+        pdf.setFontSize(10);
+        pdf.setFont(undefined, 'bold');
+        pdf.setTextColor(255, 255, 255);
+        pdf.text("DESCRIPCIÓN", margin + 3, yPos + 4);
+        pdf.text("CANT.", pageWidth - margin - 70, yPos + 4, { align: "right" });
+        pdf.text("PRECIO", pageWidth - margin - 5, yPos + 4, { align: "right" });
+        yPos += 12;
+        
+        pdf.setFont(undefined, 'normal');
+        pdf.setFontSize(9);
+        pdf.setTextColor(0, 0, 0);
+        rowCount = 0;
+      }
       
-      yPos += Math.max(descLines.length * 5, 8) + 2;
+      // Alternate row background
+      if (rowCount % 2 === 0) {
+        pdf.setFillColor(248, 250, 252);
+        pdf.rect(margin, yPos - 2, contentWidth, rowHeight, "F");
+      }
+      
+      // Draw borders
+      pdf.setDrawColor(220, 220, 225);
+      pdf.setLineWidth(0.1);
+      pdf.rect(margin, yPos - 2, contentWidth, rowHeight);
+      
+      // Content
+      pdf.text(descLines, margin + 3, yPos + 2);
+      pdf.text(`${cantidad} ${unidad}`, pageWidth - margin - 70, yPos + 2, { align: "right" });
+      pdf.setFont(undefined, 'bold');
+      pdf.text(`$${formatMoney(precio)}`, pageWidth - margin - 5, yPos + 2, { align: "right" });
+      pdf.setFont(undefined, 'normal');
+      
+      yPos += rowHeight;
+      rowCount++;
     });
     
-    // Total
-    yPos += 10;
-    pdf.setFontSize(12);
-    pdf.setFillColor(240, 240, 240);
-    pdf.rect(20, yPos, pageWidth - 40, 10, "F");
-    pdf.setFont(undefined, "bold");
-    pdf.text(`TOTAL: $${formatMoney(total)}`, pageWidth - 30, yPos + 7, { align: "right" });
+    // Total section
+    yPos += 8;
     
-    // Footer
-    pdf.setFontSize(8);
-    pdf.setFont(undefined, "normal");
-    pdf.setTextColor(128, 128, 128);
-    yPos += 25;
-    if (yPos > 270) {
+    // Check if total section fits
+    if (yPos + 20 > pageHeight - 35) {
       pdf.addPage();
-      yPos = 30;
+      currentPage++;
+      addPageHeader();
+      yPos = 60;
     }
-    pdf.text("Presupuesto válido por 30 días.", 20, yPos);
-    pdf.text("Gracias por confiar en nosotros.", 20, yPos + 10);
+    
+    pdf.setDrawColor(37, 99, 235);
+    pdf.setLineWidth(0.5);
+    pdf.setFillColor(37, 99, 235);
+    pdf.rect(margin, yPos, contentWidth, 12, "FD");
+    
+    pdf.setFontSize(13);
+    pdf.setFont(undefined, 'bold');
+    pdf.setTextColor(255, 255, 255);
+    pdf.text(`TOTAL: $${formatMoney(total)}`, pageWidth - margin - 5, yPos + 8, { align: "right" });
+    
+    yPos += 20;
+    
+    // Footer section
+    if (yPos + 25 > pageHeight - 15) {
+      pdf.addPage();
+      currentPage++;
+      addPageHeader();
+      yPos = 60;
+    }
+    
+    pdf.setFontSize(9);
+    pdf.setFont(undefined, 'normal');
+    pdf.setTextColor(100, 100, 100);
+    pdf.text("• Presupuesto válido por 30 días.", margin, yPos + 5);
+    pdf.text("• Los precios incluyen materiales y mano de obra.", margin, yPos + 11);
+    pdf.text("• Gracias por confiar en nosotros.", margin, yPos + 17);
+    
+    // Final footer
+    pdf.setFontSize(8);
+    pdf.setTextColor(150, 150, 150);
+    pdf.text(company, pageWidth / 2, pageHeight - 10, { align: "center" });
     
     pdf.save(`presupuesto-${nombre.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
     toast.success("Presupuesto comercial exportado");
@@ -958,123 +1282,267 @@ export default function CotizadorPage() {
 
     const pdf = new jsPDF();
     const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 20;
+    const contentWidth = pageWidth - (2 * margin);
     const company = settings.company_name || "Am Soluciones Constructivas";
     
-    // Header
-    pdf.setFontSize(20);
-    pdf.setTextColor(37, 99, 235);
-    pdf.text(company, 20, 25);
+    let currentPage = 1;
+
+    function addPageHeader(isFirstPage = false) {
+      // Header background
+      pdf.setFillColor(37, 99, 235);
+      pdf.rect(0, 0, pageWidth, 45, "F");
+      
+      // Company name
+      pdf.setFontSize(20);
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFont(undefined, 'bold');
+      pdf.text(company, margin, 18);
+      
+      // Document title
+      pdf.setFontSize(14);
+      pdf.setFont(undefined, 'normal');
+      pdf.text("PRESUPUESTO TÉCNICO INTERNO", margin, 32);
+      
+      // Page number
+      pdf.setFontSize(9);
+      pdf.text(`Página ${currentPage}`, pageWidth - margin - 20, 38);
+      
+      pdf.setTextColor(0, 0, 0);
+    }
+
+    addPageHeader(true);
     
-    pdf.setFontSize(16);
-    pdf.setTextColor(0, 0, 0);
-    pdf.text("PRESUPUESTO TÉCNICO", 20, 40);
-    
-    pdf.setFontSize(12);
-    pdf.text(`Proyecto: ${nombre}`, 20, 55);
-    pdf.text(`Fecha: ${new Date().toLocaleDateString('es-AR')}`, 20, 65);
-    
-    let yPos = 80;
-    
-    // Cost breakdown
-    pdf.setFontSize(14);
-    pdf.setFont(undefined, "bold");
-    pdf.text("DESGLOSE DE COSTOS", 20, yPos);
-    yPos += 15;
-    
+    let yPos = 55;
+
+    // Project info section
+    pdf.setFontSize(11);
+    pdf.setFont(undefined, 'bold');
+    pdf.setTextColor(60, 60, 60);
+    pdf.text("INFORMACIÓN DEL PROYECTO", margin, yPos);
+    yPos += 8;
+
+    pdf.setFont(undefined, 'normal');
     pdf.setFontSize(10);
-    pdf.setFont(undefined, "normal");
+    pdf.setTextColor(0, 0, 0);
+
+    // Info box with background
+    pdf.setFillColor(245, 247, 250);
+    pdf.rect(margin, yPos - 3, contentWidth, 18, "F");
+    
+    pdf.text(`Proyecto: ${nombre}`, margin + 5, yPos + 3);
+    pdf.text(`Fecha: ${new Date().toLocaleDateString('es-AR')}`, margin + 5, yPos + 10);
+    
+    yPos += 25;
+    
+    // Cost breakdown section
+    pdf.setFontSize(11);
+    pdf.setFont(undefined, 'bold');
+    pdf.setTextColor(60, 60, 60);
+    pdf.text("DESGLOSE DE COSTOS POR RUBRO", margin, yPos);
+    yPos += 12;
+    
+    pdf.setFont(undefined, 'normal');
+    pdf.setFontSize(9);
     
     items.forEach((item, index) => {
-      if (yPos > 240) {
+      const cantidad = item.m2 || 1;
+      const unidad = item.unidad || "m2";
+      const desc = item.descripcion || `Rubro ${index + 1}`;
+      
+      // Calculate space needed for this item (header + 4 lines of costs)
+      const itemHeight = 30;
+      
+      // Check if we need a new page
+      if (yPos + itemHeight > pageHeight - 35) {
         pdf.addPage();
-        yPos = 30;
+        currentPage++;
+        addPageHeader();
+        yPos = 60;
       }
       
-      pdf.setFont(undefined, "bold");
-      pdf.text(`${index + 1}. ${item.descripcion || `Rubro ${index + 1}`}`, 20, yPos);
-      yPos += 8;
+      // Item box background
+      pdf.setFillColor(248, 250, 252);
+      pdf.setDrawColor(200, 210, 220);
+      pdf.setLineWidth(0.3);
+      pdf.rect(margin, yPos, contentWidth, itemHeight, "FD");
       
-      pdf.setFont(undefined, "normal");
-      pdf.text(`   Cantidad: ${item.m2 || 1} ${item.unidad || 'm2'}`, 25, yPos);
-      yPos += 5;
-      pdf.text(`   Materiales: $${formatMoney(item.costo_materiales)}`, 25, yPos);
-      yPos += 5;
-      pdf.text(`   Mano de obra: $${formatMoney(item.costo_mano_obra)}`, 25, yPos);
-      yPos += 5;
-      pdf.text(`   Costos fijos: $${formatMoney(item.costo_fijos_prorrateados)}`, 25, yPos);
-      yPos += 5;
-      pdf.setFont(undefined, "bold");
-      pdf.text(`   Subtotal: $${formatMoney(item.subtotal)}`, 25, yPos);
-      yPos += 10;
-    });
-    
-    // Materials list
-    if (materialsPurchasingList.length > 0) {
-      if (yPos > 200) {
-        pdf.addPage();
-        yPos = 30;
-      }
-      
-      yPos += 10;
-      pdf.setFontSize(14);
-      pdf.setFont(undefined, "bold");
-      pdf.text("LISTA DE MATERIALES PARA COMPRAS", 20, yPos);
-      yPos += 15;
-      
-      // Table header
+      // Item title
+      pdf.setFont(undefined, 'bold');
       pdf.setFontSize(10);
-      pdf.setFillColor(37, 99, 235);
-      pdf.setTextColor(255, 255, 255);
-      pdf.rect(20, yPos, pageWidth - 40, 8, "F");
-      pdf.text("MATERIAL", 25, yPos + 6);
-      pdf.text("CANT.", pageWidth - 100, yPos + 6);
-      pdf.text("UNIDAD", pageWidth - 70, yPos + 6);
-      pdf.text("PRECIO UNIT.", pageWidth - 40, yPos + 6);
+      pdf.setTextColor(37, 99, 235);
+      const itemTitle = `${index + 1}. ${desc}`;
+      const titleLines = pdf.splitTextToSize(itemTitle, contentWidth - 10);
+      pdf.text(titleLines, margin + 5, yPos + 6);
       
-      yPos += 12;
+      // Item details
+      pdf.setFont(undefined, 'normal');
+      pdf.setFontSize(9);
       pdf.setTextColor(0, 0, 0);
       
+      const detailsY = yPos + 6 + (titleLines.length * 4) + 2;
+      pdf.text(`Cantidad: ${cantidad} ${unidad}`, margin + 10, detailsY);
+      pdf.text(`Materiales: $${formatMoney(item.costo_materiales)}`, margin + 10, detailsY + 5);
+      pdf.text(`Mano de obra: $${formatMoney(item.costo_mano_obra)}`, margin + 10, detailsY + 10);
+      pdf.text(`Costos fijos: $${formatMoney(item.costo_fijos_prorrateados)}`, margin + 10, detailsY + 15);
+      
+      // Subtotal (aligned right)
+      pdf.setFont(undefined, 'bold');
+      pdf.setTextColor(37, 99, 235);
+      pdf.text(`Subtotal: $${formatMoney(item.subtotal)}`, pageWidth - margin - 5, detailsY + 15, { align: "right" });
+      
+      yPos += itemHeight + 5;
+    });
+    
+    // Materials list section
+    if (materialsPurchasingList.length > 0) {
+      yPos += 10;
+      
+      // Check if we need new page for materials section header
+      if (yPos + 40 > pageHeight - 35) {
+        pdf.addPage();
+        currentPage++;
+        addPageHeader();
+        yPos = 60;
+      }
+      
+      pdf.setFontSize(11);
+      pdf.setFont(undefined, 'bold');
+      pdf.setTextColor(60, 60, 60);
+      pdf.text("LISTA DE MATERIALES PARA COMPRAS", margin, yPos);
+      yPos += 12;
+      
+      // Table header
+      pdf.setDrawColor(37, 99, 235);
+      pdf.setLineWidth(0.5);
+      pdf.setFillColor(37, 99, 235);
+      pdf.rect(margin, yPos - 2, contentWidth, 10, "FD");
+      
+      pdf.setFontSize(9);
+      pdf.setFont(undefined, 'bold');
+      pdf.setTextColor(255, 255, 255);
+      
+      pdf.text("MATERIAL", margin + 3, yPos + 4);
+      pdf.text("CANT.", pageWidth - margin - 90, yPos + 4, { align: "right" });
+      pdf.text("UNIDAD", pageWidth - margin - 60, yPos + 4, { align: "center" });
+      pdf.text("P. UNIT.", pageWidth - margin - 5, yPos + 4, { align: "right" });
+      
+      yPos += 12;
+      
+      // Materials
+      pdf.setFont(undefined, 'normal');
+      pdf.setFontSize(8);
+      pdf.setTextColor(0, 0, 0);
+      let rowCount = 0;
+      
       materialsPurchasingList.forEach((mat) => {
-        if (yPos > 260) {
+        const matName = mat.nombre || `Material ${mat.material_id}`;
+        const matLines = pdf.splitTextToSize(matName, contentWidth - 105);
+        const rowHeight = Math.max(matLines.length * 4, 7);
+        
+        // Check if we need a new page
+        if (yPos + rowHeight + 5 > pageHeight - 35) {
           pdf.addPage();
-          yPos = 30;
+          currentPage++;
+          addPageHeader();
+          yPos = 60;
+          
+          // Re-add table header
+          pdf.setFillColor(37, 99, 235);
+          pdf.rect(margin, yPos - 2, contentWidth, 10, "FD");
+          pdf.setFontSize(9);
+          pdf.setFont(undefined, 'bold');
+          pdf.setTextColor(255, 255, 255);
+          pdf.text("MATERIAL", margin + 3, yPos + 4);
+          pdf.text("CANT.", pageWidth - margin - 90, yPos + 4, { align: "right" });
+          pdf.text("UNIDAD", pageWidth - margin - 60, yPos + 4, { align: "center" });
+          pdf.text("P. UNIT.", pageWidth - margin - 5, yPos + 4, { align: "right" });
+          yPos += 12;
+          
+          pdf.setFont(undefined, 'normal');
+          pdf.setFontSize(8);
+          pdf.setTextColor(0, 0, 0);
+          rowCount = 0;
         }
         
-        const matName = mat.nombre || `Material ${mat.material_id}`;
-        const matLines = pdf.splitTextToSize(matName, pageWidth - 140);
-        pdf.text(matLines, 25, yPos + 4);
+        // Alternate row background
+        if (rowCount % 2 === 0) {
+          pdf.setFillColor(248, 250, 252);
+          pdf.rect(margin, yPos - 2, contentWidth, rowHeight, "F");
+        }
         
-        pdf.text(String(mat.cantidad), pageWidth - 100, yPos + 4, { align: "right" });
-        pdf.text(mat.unidad || "-", pageWidth - 70, yPos + 4, { align: "right" });
-        pdf.text(`$${formatMoney(mat.precio_unitario)}`, pageWidth - 25, yPos + 4, { align: "right" });
+        // Draw borders
+        pdf.setDrawColor(220, 220, 225);
+        pdf.setLineWidth(0.1);
+        pdf.rect(margin, yPos - 2, contentWidth, rowHeight);
         
-        yPos += Math.max(matLines.length * 5, 8) + 2;
+        // Content
+        pdf.text(matLines, margin + 3, yPos + 2);
+        pdf.text(String(mat.cantidad), pageWidth - margin - 90, yPos + 2, { align: "right" });
+        pdf.text(mat.unidad || "-", pageWidth - margin - 60, yPos + 2, { align: "center" });
+        pdf.text(`$${formatMoney(mat.precio_unitario)}`, pageWidth - margin - 5, yPos + 2, { align: "right" });
+        
+        yPos += rowHeight;
+        rowCount++;
       });
     }
     
-    // Summary
+    // Summary section
     yPos += 15;
-    if (yPos > 250) {
+    
+    // Check if summary fits
+    if (yPos + 50 > pageHeight - 20) {
       pdf.addPage();
-      yPos = 30;
+      currentPage++;
+      addPageHeader();
+      yPos = 60;
     }
     
-    pdf.setFontSize(12);
-    pdf.setFont(undefined, "bold");
-    pdf.text("RESUMEN FINANCIERO", 20, yPos);
+    pdf.setFontSize(11);
+    pdf.setFont(undefined, 'bold');
+    pdf.setTextColor(60, 60, 60);
+    pdf.text("RESUMEN FINANCIERO", margin, yPos);
     yPos += 10;
     
-    pdf.setFont(undefined, "normal");
-    pdf.text(`Costo base: $${formatMoney(costoBase)}`, 20, yPos);
+    // Summary box
+    pdf.setFillColor(245, 247, 250);
+    pdf.setDrawColor(200, 210, 220);
+    pdf.setLineWidth(0.3);
+    
+    let summaryHeight = 25;
+    if (applyMargin && margenGanancia > 0) summaryHeight += 8;
+    
+    pdf.rect(margin, yPos, contentWidth, summaryHeight, "FD");
+    
+    pdf.setFont(undefined, 'normal');
+    pdf.setFontSize(10);
+    pdf.setTextColor(0, 0, 0);
+    
+    yPos += 8;
+    pdf.text(`Costo base:`, margin + 5, yPos);
+    pdf.text(`$${formatMoney(costoBase)}`, pageWidth - margin - 5, yPos, { align: "right" });
     yPos += 8;
     
     if (applyMargin && margenGanancia > 0) {
-      pdf.text(`Margen (${margenGanancia}%): $${formatMoney(costoBase * (margenGanancia / 100))}`, 20, yPos);
+      pdf.text(`Margen (${margenGanancia}%):`, margin + 5, yPos);
+      pdf.text(`$${formatMoney(costoBase * (margenGanancia / 100))}`, pageWidth - margin - 5, yPos, { align: "right" });
       yPos += 8;
     }
     
-    pdf.setFont(undefined, "bold");
-    pdf.text(`TOTAL: $${formatMoney(total)}`, 20, yPos);
+    // Total with highlighted background
+    pdf.setFillColor(37, 99, 235);
+    pdf.rect(margin, yPos - 3, contentWidth, 10, "F");
+    pdf.setFont(undefined, 'bold');
+    pdf.setFontSize(12);
+    pdf.setTextColor(255, 255, 255);
+    pdf.text(`TOTAL:`, margin + 5, yPos + 4);
+    pdf.text(`$${formatMoney(total)}`, pageWidth - margin - 5, yPos + 4, { align: "right" });
+    
+    // Final footer
+    pdf.setFontSize(8);
+    pdf.setTextColor(150, 150, 150);
+    pdf.text(`${company} - Documento Interno`, pageWidth / 2, pageHeight - 10, { align: "center" });
     
     pdf.save(`presupuesto-tecnico-${nombre.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
     toast.success("Presupuesto técnico exportado");

@@ -357,64 +357,226 @@ export default function CajaPage() {
     }
 
     try {
-      // Import XLSX dynamically to avoid SSR issues
-      const XLSX = require('xlsx');
-      
-      // Prepare data with headers
-      const headers = ['Fecha', 'Tipo', 'Concepto', 'Categoría', 'Medio de Pago', 'Cliente', 'Proyecto', 'Monto'];
-      
-      const data = movements.map(movement => [
-        new Date(movement.date).toLocaleDateString('es-AR'),
-        movement.type === 'ingreso' ? 'Ingreso' : 'Egreso',
-        movement.concept || '',
-        movement.category || '',
-        WALLET_CONFIG[movement.payment_method]?.label || movement.payment_method,
-        movement.client_name || '',
-        movement.project_name || '',
-        Number(movement.amount)
-      ]);
-      
-      // Calculate totals
+      // Import ExcelJS for professional Excel generation
+      const ExcelJS = require('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Movimientos", { pageSetup: { paperSize: 9, orientation: 'landscape' } });
+
+      // Color palette from the app
+      const primaryBlue = 'FF2563EB';   // rgb(37, 99, 235)
+      const darkBlue = 'FF1F2937';      // rgb(31, 41, 55)
+      const successGreen = 'FF22C55E';  // rgb(34, 197, 94)
+      const errorRed = 'FFEF4444';      // rgb(239, 68, 68)
+      const lightGray = 'FFF3F4F6';     // rgb(243, 244, 246)
+      const borderGray = 'FFD1D5DB';    // rgb(209, 213, 219)
+
+      // Set column widths
+      worksheet.columns = [
+        { header: 'Fecha', width: 14, key: 'fecha' },
+        { header: 'Tipo', width: 12, key: 'tipo' },
+        { header: 'Concepto', width: 40, key: 'concepto' },
+        { header: 'Categoría', width: 18, key: 'categoria' },
+        { header: 'Medio de Pago', width: 16, key: 'medio' },
+        { header: 'Cliente', width: 22, key: 'cliente' },
+        { header: 'Proyecto', width: 35, key: 'proyecto' },
+        { header: 'Monto', width: 16, key: 'monto' }
+      ];
+
+      // Title row (merged cells)
+      const titleRow = worksheet.insertRow(1, []);
+      titleRow.height = 28;
+      worksheet.mergeCells('A1:H1');
+      const titleCell = titleRow.getCell(1);
+      titleCell.value = 'REPORTE DE MOVIMIENTOS DE CAJA';
+      titleCell.font = { name: 'Calibri', size: 18, bold: true, color: { argb: 'FFFFFFFF' } };
+      titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: primaryBlue } };
+      titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      // Subtitle with date row
+      const subtitleRow = worksheet.insertRow(2, []);
+      subtitleRow.height = 20;
+      worksheet.mergeCells('A2:H2');
+      const subtitleCell = subtitleRow.getCell(1);
+      subtitleCell.value = `Generado: ${new Date().toLocaleDateString('es-AR')} - ${new Date().toLocaleTimeString('es-AR')}`;
+      subtitleCell.font = { name: 'Calibri', size: 11, color: { argb: 'FF6B7280' } };
+      subtitleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      subtitleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9FAFB' } };
+
+      // Empty row
+      worksheet.insertRow(3, []);
+
+      // Header row (starts at row 4)
+      const headerRow = worksheet.getRow(4);
+      headerRow.height = 22;
+      headerRow.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: primaryBlue } };
+      headerRow.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+
+      // Apply header border
+      for (let col = 1; col <= 8; col++) {
+        const cell = headerRow.getCell(col);
+        cell.border = {
+          top: { style: 'thin', color: { argb: primaryBlue } },
+          bottom: { style: 'thin', color: { argb: primaryBlue } },
+          left: { style: 'thin', color: { argb: primaryBlue } },
+          right: { style: 'thin', color: { argb: primaryBlue } }
+        };
+      }
+
+      // Data rows
+      let rowNum = 5;
       const totalIngresos = movements.filter(m => m.type === 'ingreso').reduce((sum, m) => sum + Number(m.amount), 0);
       const totalEgresos = movements.filter(m => m.type === 'egreso').reduce((sum, m) => sum + Number(m.amount), 0);
       const neto = totalIngresos - totalEgresos;
-      
-      // Create worksheet data with summary
-      const worksheetData = [
-        headers,
-        ...data,
-        [],
-        ['RESUMEN'],
-        ['Total Ingresos', '', '', '', '', '', '', totalIngresos],
-        ['Total Egresos', '', '', '', '', '', '', totalEgresos],
-        ['Neto', '', '', '', '', '', '', neto]
-      ];
-      
-      // Create worksheet and workbook
-      const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
-      
-      // Set column widths
-      worksheet['!cols'] = [
-        { wch: 12 },  // Fecha
-        { wch: 10 },  // Tipo
-        { wch: 20 },  // Concepto
-        { wch: 15 },  // Categoría
-        { wch: 15 },  // Medio de Pago
-        { wch: 20 },  // Cliente
-        { wch: 20 },  // Proyecto
-        { wch: 12 }   // Monto
-      ];
-      
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "Movimientos");
-      
-      // Generate filename
+
+      movements.forEach((movement, index) => {
+        const row = worksheet.getRow(rowNum);
+        row.height = 25;
+
+        // Alternate row coloring
+        const isEven = index % 2 === 0;
+        const bgColor = isEven ? 'FFFFFFFF' : lightGray;
+
+        row.getCell(1).value = new Date(movement.date).toLocaleDateString('es-AR');
+        row.getCell(2).value = movement.type === 'ingreso' ? 'INGRESO' : 'EGRESO';
+        row.getCell(3).value = movement.concept || '';
+        row.getCell(4).value = movement.category || '';
+        row.getCell(5).value = WALLET_CONFIG[movement.payment_method]?.label || movement.payment_method;
+        row.getCell(6).value = movement.client_name || '';
+        row.getCell(7).value = movement.project_name || '';
+        row.getCell(8).value = Number(movement.amount);
+
+        // Format row style
+        for (let col = 1; col <= 8; col++) {
+          const cell = row.getCell(col);
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+          cell.border = {
+            top: { style: 'thin', color: { argb: borderGray } },
+            bottom: { style: 'thin', color: { argb: borderGray } },
+            left: { style: 'thin', color: { argb: borderGray } },
+            right: { style: 'thin', color: { argb: borderGray } }
+          };
+          cell.font = { name: 'Calibri', size: 10, color: { argb: darkBlue } };
+        }
+
+        // Color code the type
+        const typeCell = row.getCell(2);
+        typeCell.font = { 
+          name: 'Calibri', 
+          size: 10, 
+          bold: true,
+          color: { argb: movement.type === 'ingreso' ? successGreen : errorRed } 
+        };
+
+        // Format monto (currency)
+        const montoCell = row.getCell(8);
+        montoCell.numFmt = '"$"#,##0.00';
+        montoCell.alignment = { horizontal: 'right' };
+        montoCell.font = { 
+          name: 'Calibri', 
+          size: 10, 
+          bold: true,
+          color: { argb: movement.type === 'ingreso' ? successGreen : errorRed } 
+        };
+
+        // Center alignment for fecha y tipo
+        row.getCell(1).alignment = { horizontal: 'center' };
+        row.getCell(2).alignment = { horizontal: 'center' };
+
+        // Enable text wrapping for Concepto and Proyecto columns
+        row.getCell(3).alignment = { wrapText: true, vertical: 'top' };
+        row.getCell(7).alignment = { wrapText: true, vertical: 'top' };
+
+        rowNum++;
+      });
+
+      // Empty row before summary
+      worksheet.insertRow(rowNum, []);
+      rowNum++;
+
+      // SUMMARY SECTION
+      const summaryStartRow = rowNum;
+
+      // Total Ingresos
+      const ingresosRow = worksheet.getRow(rowNum);
+      ingresosRow.height = 20;
+      worksheet.mergeCells(`A${rowNum}:G${rowNum}`);
+      ingresosRow.getCell(1).value = 'TOTAL INGRESOS';
+      ingresosRow.getCell(8).value = totalIngresos;
+      ingresosRow.getCell(1).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      ingresosRow.getCell(8).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      ingresosRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: successGreen } };
+      ingresosRow.getCell(8).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: successGreen } };
+      ingresosRow.getCell(8).numFmt = '"$"#,##0.00';
+      ingresosRow.getCell(8).alignment = { horizontal: 'right', vertical: 'middle' };
+      ingresosRow.getCell(1).alignment = { horizontal: 'right', vertical: 'middle' };
+
+      for (let col = 1; col <= 8; col++) {
+        const cell = ingresosRow.getCell(col);
+        cell.border = { top: { style: 'thin', color: { argb: successGreen } }, bottom: { style: 'thin', color: { argb: successGreen } } };
+      }
+      rowNum++;
+
+      // Total Egresos
+      const egresosRow = worksheet.getRow(rowNum);
+      egresosRow.height = 20;
+      worksheet.mergeCells(`A${rowNum}:G${rowNum}`);
+      egresosRow.getCell(1).value = 'TOTAL EGRESOS';
+      egresosRow.getCell(8).value = totalEgresos;
+      egresosRow.getCell(1).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      egresosRow.getCell(8).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      egresosRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: errorRed } };
+      egresosRow.getCell(8).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: errorRed } };
+      egresosRow.getCell(8).numFmt = '"$"#,##0.00';
+      egresosRow.getCell(8).alignment = { horizontal: 'right', vertical: 'middle' };
+      egresosRow.getCell(1).alignment = { horizontal: 'right', vertical: 'middle' };
+
+      for (let col = 1; col <= 8; col++) {
+        const cell = egresosRow.getCell(col);
+        cell.border = { top: { style: 'thin', color: { argb: errorRed } }, bottom: { style: 'thin', color: { argb: errorRed } } };
+      }
+      rowNum++;
+
+      // Neto (Total)
+      const netoRow = worksheet.getRow(rowNum);
+      netoRow.height = 24;
+      worksheet.mergeCells(`A${rowNum}:G${rowNum}`);
+      netoRow.getCell(1).value = 'NETO';
+      netoRow.getCell(8).value = neto;
+      netoRow.getCell(1).font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
+      netoRow.getCell(8).font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
+      netoRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: primaryBlue } };
+      netoRow.getCell(8).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: primaryBlue } };
+      netoRow.getCell(8).numFmt = '"$"#,##0.00';
+      netoRow.getCell(8).alignment = { horizontal: 'right', vertical: 'middle' };
+      netoRow.getCell(1).alignment = { horizontal: 'right', vertical: 'middle' };
+
+      for (let col = 1; col <= 8; col++) {
+        const cell = netoRow.getCell(col);
+        cell.border = { top: { style: 'thin', color: { argb: primaryBlue } }, bottom: { style: 'thin', color: { argb: primaryBlue } } };
+      }
+
+      // Freeze panes
+      worksheet.views = [{ state: 'frozen', ySplit: 4 }];
+
+      // Generate and download
       const filename = `movimientos-caja-${new Date().toISOString().split('T')[0]}.xlsx`;
       
-      // Write file
-      XLSX.writeFile(workbook, filename);
-      
-      toast.success("Archivo Excel generado correctamente");
+      workbook.xlsx.writeBuffer().then((buffer: any) => {
+        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        toast.success("Archivo Excel profesional generado");
+      }).catch((error: any) => {
+        console.error("Error writing Excel:", error);
+        toast.error("Error al generar el archivo Excel");
+      });
     } catch (error) {
       console.error("Error generating Excel:", error);
       toast.error("Error al generar el archivo Excel");

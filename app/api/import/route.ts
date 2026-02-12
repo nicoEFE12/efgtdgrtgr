@@ -32,15 +32,25 @@ export async function POST(request: Request) {
     // Get data from first sheet (or specified sheet)
     const sheetName = sheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as unknown[][];
+    const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" }) as unknown[][];
     
     // Get headers (first row)
-    const headers = rawData[0] as string[];
+    const headers = (rawData[0] || []) as string[];
+    const headerLength = headers.length;
     
-    // Get data rows
-    const rows = rawData.slice(1).filter(row => 
-      Array.isArray(row) && row.some(cell => cell !== null && cell !== undefined && cell !== "")
-    );
+    // Get data rows - normalize to match header length
+    const rows = rawData.slice(1)
+      .filter(row => 
+        Array.isArray(row) && row.some(cell => cell !== null && cell !== undefined && cell !== "")
+      )
+      .map(row => {
+        // Normalize row length to match headers
+        const normalizedRow = Array.isArray(row) ? [...row] : [];
+        while (normalizedRow.length < headerLength) {
+          normalizedRow.push("");
+        }
+        return normalizedRow.slice(0, headerLength);
+      });
 
     // If preview mode, return data for preview
     if (type === "preview") {
