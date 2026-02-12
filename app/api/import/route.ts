@@ -29,49 +29,88 @@ export async function POST(request: Request) {
     // Get sheet names
     const sheetNames = workbook.SheetNames;
     
-    // Get data from first sheet (or specified sheet)
-    const sheetName = sheetNames[0];
+    // Get requested sheet name (or use first sheet)
+    const requestedSheet = formData.get("sheetName") as string;
+    const sheetName = requestedSheet && sheetNames.includes(requestedSheet) 
+      ? requestedSheet 
+      : sheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" }) as unknown[][];
     
-    // Get headers (first row)
-    const headers = (rawData[0] || []) as string[];
-    const headerLength = headers.length;
+    // Get the range of the worksheet to understand actual data bounds
+    const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
     
-    // Get data rows - normalize to match header length
-    const rows = rawData.slice(1)
-      .filter(row => 
-        Array.isArray(row) && row.some(cell => cell !== null && cell !== undefined && cell !== "")
-      )
-      .map(row => {
-        // Normalize row length to match headers
-        const normalizedRow = Array.isArray(row) ? [...row] : [];
-        while (normalizedRow.length < headerLength) {
-          normalizedRow.push("");
-        }
-        return normalizedRow.slice(0, headerLength);
-      });
+    // Read ALL raw data (header: 1 = array of arrays, no key inference)
+    const rawData = XLSX.utils.sheet_to_json(worksheet, { 
+      header: 1, 
+      defval: "",
+      range: range,
+      raw: false
+    }) as unknown[][];
 
-    // If preview mode, return data for preview
+    // Determine max column count across all rows
+    const maxCols = rawData.reduce((max, row) => Math.max(max, Array.isArray(row) ? row.length : 0), 0);
+    
+    // Normalize all rows to same length
+    const allRows = rawData.map(row => {
+      const arr = Array.isArray(row) ? [...row] : [];
+      while (arr.length < maxCols) arr.push("");
+      return arr.slice(0, maxCols);
+    });
+
+    // The first row is treated as headers for preview purposes
+    const rawHeaders = (allRows[0] || []) as string[];
+    const headers = rawHeaders.map((h, index) => {
+      const cleaned = String(h || "").trim();
+      return cleaned || `Columna ${index + 1}`;
+    });
+
+    // Data rows = everything after the first row (for preview)
+    const dataRows = allRows.slice(1).filter(row => 
+      row.some(cell => cell !== null && cell !== undefined && cell !== "")
+    );
+
+    // If preview mode, return data for the UI
     if (type === "preview") {
+      const sheetsInfo = sheetNames.map(name => {
+        const ws = workbook.Sheets[name];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as unknown[][];
+        const rowCount = data.slice(1).filter(row => 
+          Array.isArray(row) && row.some(cell => cell !== null && cell !== undefined && cell !== "")
+        ).length;
+        return { name, rowCount };
+      });
+      
       return NextResponse.json({
         success: true,
         sheetNames,
+        sheetsInfo,
+        currentSheet: sheetName,
         headers,
-        rows: rows.slice(0, 50), // Limit preview to 50 rows
-        totalRows: rows.length,
+        rows: dataRows,
+        totalRows: dataRows.length,
       });
     }
 
-    // Parse column mapping
+    // ── Import mode: use headerRow / dataStartRow / dataEndRow from the client ──
     const mapping = columnMapping ? JSON.parse(columnMapping) : null;
+    const clientHeaderRow = parseInt(formData.get("headerRow") as string) || 0;
+    const clientDataStart = parseInt(formData.get("dataStartRow") as string) || 1;
+    const clientDataEndRaw = formData.get("dataEndRow") as string;
+    const clientDataEnd = clientDataEndRaw ? parseInt(clientDataEndRaw) : null;
+
+    // allRows is 0-indexed matching the client's absoluteIdx
+    // headerRow index is just for reference; data is from dataStartRow to dataEndRow
+    const endIdx = clientDataEnd !== null ? clientDataEnd + 1 : allRows.length;
+    const importRows = allRows.slice(clientDataStart, endIdx).filter(row =>
+      row.some(cell => cell !== null && cell !== undefined && cell !== "")
+    );
 
     if (type === "materials" && mapping) {
-      return await importMaterials(rows, headers, mapping);
+      return await importMaterials(importRows, headers, mapping);
     }
 
     if (type === "settings" && mapping) {
-      return await importSettings(rows, headers, mapping);
+      return await importSettings(importRows, headers, mapping);
     }
 
     return NextResponse.json({ error: "Tipo de importación no válido" }, { status: 400 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useMemo } from "react";
 import {
   Upload,
   FileSpreadsheet,
@@ -10,6 +10,12 @@ import {
   ArrowRight,
   RefreshCw,
   Download,
+  ChevronLeft,
+  ChevronRight,
+  Layers,
+  MousePointerClick,
+  X,
+  Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,14 +35,27 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/dashboard/page-header";
 
 type ImportType = "materials" | "settings";
 
+interface SheetInfo {
+  name: string;
+  rowCount: number;
+}
+
 interface PreviewData {
   sheetNames: string[];
+  sheetsInfo: SheetInfo[];
+  currentSheet: string;
   headers: string[];
   rows: unknown[][];
   totalRows: number;
@@ -50,86 +69,149 @@ interface ImportResult {
   hasMoreErrors: boolean;
 }
 
-const MATERIAL_COLUMNS = [
-  { key: "nombre", label: "Nombre/Material", required: true },
-  { key: "precio", label: "Precio Unitario", required: true },
-  { key: "unidad", label: "Unidad de Medida", required: false },
-  { key: "proveedor", label: "Proveedor", required: false },
-  { key: "codigo", label: "Código/Referencia", required: false },
-  { key: "categoria", label: "Categoría", required: false },
+// Field definitions with colors for each import type
+const MATERIAL_FIELDS = [
+  { key: "nombre", label: "Nombre", color: "bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200", headerColor: "bg-blue-500", required: true },
+  { key: "precio", label: "Precio Unit.", color: "bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-200", headerColor: "bg-green-500", required: true },
+  { key: "unidad", label: "Unidad", color: "bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-200", headerColor: "bg-purple-500", required: false },
+  { key: "proveedor", label: "Proveedor", color: "bg-orange-100 dark:bg-orange-900/40 text-orange-800 dark:text-orange-200", headerColor: "bg-orange-500", required: false },
+  { key: "codigo", label: "Código", color: "bg-pink-100 dark:bg-pink-900/40 text-pink-800 dark:text-pink-200", headerColor: "bg-pink-500", required: false },
+  { key: "categoria", label: "Categoría", color: "bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-200", headerColor: "bg-yellow-500", required: false },
 ];
 
-const SETTINGS_COLUMNS = [
-  { key: "key", label: "Clave/Parámetro", required: true },
-  { key: "value", label: "Valor", required: true },
-  { key: "description", label: "Descripción", required: false },
+const SETTINGS_FIELDS = [
+  { key: "key", label: "Clave", color: "bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200", headerColor: "bg-blue-500", required: true },
+  { key: "value", label: "Valor", color: "bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-200", headerColor: "bg-green-500", required: true },
+  { key: "description", label: "Descripción", color: "bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-200", headerColor: "bg-purple-500", required: false },
 ];
 
 export default function ImportPage() {
-  const [step, setStep] = useState<"upload" | "preview" | "mapping" | "result">("upload");
+  const [step, setStep] = useState<"upload" | "configure" | "result">("upload");
   const [file, setFile] = useState<File | null>(null);
   const [importType, setImportType] = useState<ImportType>("materials");
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
   const [columnMapping, setColumnMapping] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
+  const [selectedSheet, setSelectedSheet] = useState<string>("");
+  const [previewPage, setPreviewPage] = useState(0);
+  const [headerRow, setHeaderRow] = useState(0);
+  const [dataStartRow, setDataStartRow] = useState(1);
+  const [dataEndRow, setDataEndRow] = useState<number | null>(null);
+  const [openPopoverCol, setOpenPopoverCol] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const columns = importType === "materials" ? MATERIAL_COLUMNS : SETTINGS_COLUMNS;
+  const ROWS_PER_PAGE = 20;
+  const fields = importType === "materials" ? MATERIAL_FIELDS : SETTINGS_FIELDS;
 
+  // All raw rows: header row as index 0, then data rows from the API
+  const allRawRows = useMemo(() => {
+    if (!previewData) return [];
+    return [previewData.headers, ...previewData.rows];
+  }, [previewData]);
+
+  // The column count (max across all rows)
+  const colCount = useMemo(() => {
+    if (!allRawRows.length) return 0;
+    return Math.max(...allRawRows.map(r => (Array.isArray(r) ? r.length : 0)));
+  }, [allRawRows]);
+
+  // Effective header labels based on headerRow selection
+  const effectiveHeaders = useMemo(() => {
+    if (!allRawRows.length || !allRawRows[headerRow]) return [];
+    const row = allRawRows[headerRow] as unknown[];
+    const headers: string[] = [];
+    for (let i = 0; i < colCount; i++) {
+      const cell = row[i];
+      const val = cell !== null && cell !== undefined ? String(cell).trim() : "";
+      headers.push(val || `Col ${i + 1}`);
+    }
+    return headers;
+  }, [allRawRows, headerRow, colCount]);
+
+  // Data rows based on range selections
+  const effectiveDataRows = useMemo(() => {
+    if (!allRawRows.length) return [];
+    const end = dataEndRow !== null ? dataEndRow + 1 : allRawRows.length;
+    return allRawRows.slice(dataStartRow, end);
+  }, [allRawRows, dataStartRow, dataEndRow]);
+
+  // Pagination for the table display
+  const totalDisplayRows = allRawRows.length;
+  const totalPages = Math.ceil(totalDisplayRows / ROWS_PER_PAGE);
+  const displayRows = useMemo(() => {
+    const start = previewPage * ROWS_PER_PAGE;
+    return allRawRows.slice(start, start + ROWS_PER_PAGE);
+  }, [allRawRows, previewPage]);
+
+  // Reverse mapping: colIndex -> fieldKey
+  const reverseMapping = useMemo(() => {
+    const rev: Record<number, string> = {};
+    for (const [key, colIdx] of Object.entries(columnMapping)) {
+      rev[colIdx] = key;
+    }
+    return rev;
+  }, [columnMapping]);
+
+  const getFieldForCol = (colIndex: number) => {
+    const fieldKey = reverseMapping[colIndex];
+    if (!fieldKey) return null;
+    return fields.find(f => f.key === fieldKey) || null;
+  };
+
+  // Load a specific sheet
+  const loadSheetData = useCallback(async (sheetName: string) => {
+    if (!file) return;
+    setLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("type", "preview");
+      formData.append("sheetName", sheetName);
+
+      const res = await fetch("/api/import", { method: "POST", body: formData });
+      const data = await res.json();
+
+      if (data.success) {
+        setPreviewData(data);
+        setSelectedSheet(data.currentSheet);
+        setPreviewPage(0);
+        setHeaderRow(0);
+        setDataStartRow(1);
+        setDataEndRow(null);
+        setColumnMapping({});
+      } else {
+        toast.error(data.error || "Error al leer la hoja");
+      }
+    } catch {
+      toast.error("Error al procesar la hoja");
+    } finally {
+      setLoading(false);
+    }
+  }, [file]);
+
+  // Upload file
   const handleFileSelect = useCallback(async (selectedFile: File) => {
     setFile(selectedFile);
     setLoading(true);
+    setPreviewPage(0);
 
     try {
       const formData = new FormData();
       formData.append("file", selectedFile);
       formData.append("type", "preview");
 
-      const res = await fetch("/api/import", {
-        method: "POST",
-        body: formData,
-      });
-
+      const res = await fetch("/api/import", { method: "POST", body: formData });
       const data = await res.json();
 
       if (data.success) {
         setPreviewData(data);
-        setStep("preview");
-        
-        // Auto-map columns based on header names
-        const autoMapping: Record<string, number> = {};
-        const headerLower = data.headers.map((h: string) => (h || "").toLowerCase());
-        
-        if (importType === "materials") {
-          const nameIdx = headerLower.findIndex((h: string) => 
-            h.includes("material") || h.includes("nombre") || h.includes("producto")
-          );
-          const priceIdx = headerLower.findIndex((h: string) => 
-            h.includes("precio") || h.includes("costo") || h.includes("valor")
-          );
-          const unitIdx = headerLower.findIndex((h: string) => 
-            h.includes("unidad") || h.includes("medida")
-          );
-          const providerIdx = headerLower.findIndex((h: string) => 
-            h.includes("proveedor") || h.includes("contacto")
-          );
-          const codeIdx = headerLower.findIndex((h: string) => 
-            h.includes("código") || h.includes("codigo") || h.includes("ref")
-          );
-          const catIdx = headerLower.findIndex((h: string) => 
-            h.includes("categoría") || h.includes("categoria") || h.includes("tipo")
-          );
-
-          if (nameIdx >= 0) autoMapping.nombre = nameIdx;
-          if (priceIdx >= 0) autoMapping.precio = priceIdx;
-          if (unitIdx >= 0) autoMapping.unidad = unitIdx;
-          if (providerIdx >= 0) autoMapping.proveedor = providerIdx;
-          if (codeIdx >= 0) autoMapping.codigo = codeIdx;
-          if (catIdx >= 0) autoMapping.categoria = catIdx;
-        }
-        
-        setColumnMapping(autoMapping);
+        setSelectedSheet(data.currentSheet);
+        setHeaderRow(0);
+        setDataStartRow(1);
+        setDataEndRow(null);
+        setColumnMapping({});
+        setStep("configure");
       } else {
         toast.error(data.error || "Error al leer el archivo");
       }
@@ -138,7 +220,7 @@ export default function ImportPage() {
     } finally {
       setLoading(false);
     }
-  }, [importType]);
+  }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -152,36 +234,67 @@ export default function ImportPage() {
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      handleFileSelect(selectedFile);
-    }
+    if (selectedFile) handleFileSelect(selectedFile);
   };
 
+  // Assign a field to a column
+  const assignField = (colIndex: number, fieldKey: string) => {
+    setColumnMapping(prev => {
+      const newMapping = { ...prev };
+      // Remove any previous field assignment to this column
+      for (const [k, v] of Object.entries(newMapping)) {
+        if (v === colIndex) delete newMapping[k];
+      }
+      if (fieldKey && fieldKey !== "none") {
+        // Remove old column for this field (if reassigning)
+        delete newMapping[fieldKey];
+        newMapping[fieldKey] = colIndex;
+      }
+      return newMapping;
+    });
+    setOpenPopoverCol(null);
+  };
+
+  // Remove assignment from column
+  const removeAssignment = (colIndex: number) => {
+    setColumnMapping(prev => {
+      const newMapping = { ...prev };
+      for (const [k, v] of Object.entries(newMapping)) {
+        if (v === colIndex) {
+          delete newMapping[k];
+          break;
+        }
+      }
+      return newMapping;
+    });
+  };
+
+  // Handle import
   const handleImport = async () => {
     if (!file || !previewData) return;
 
-    // Validate required columns
-    const requiredCols = columns.filter(c => c.required);
-    const missingCols = requiredCols.filter(c => columnMapping[c.key] === undefined);
-    
-    if (missingCols.length > 0) {
-      toast.error(`Faltan columnas requeridas: ${missingCols.map(c => c.label).join(", ")}`);
+    const requiredFields = fields.filter(f => f.required);
+    const missing = requiredFields.filter(f => columnMapping[f.key] === undefined);
+
+    if (missing.length > 0) {
+      toast.error(`Faltan campos requeridos: ${missing.map(f => f.label).join(", ")}`);
       return;
     }
 
     setLoading(true);
-
     try {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("type", importType);
       formData.append("columnMapping", JSON.stringify(columnMapping));
+      formData.append("sheetName", selectedSheet);
+      formData.append("headerRow", headerRow.toString());
+      formData.append("dataStartRow", dataStartRow.toString());
+      if (dataEndRow !== null) {
+        formData.append("dataEndRow", dataEndRow.toString());
+      }
 
-      const res = await fetch("/api/import", {
-        method: "POST",
-        body: formData,
-      });
-
+      const res = await fetch("/api/import", { method: "POST", body: formData });
       const data = await res.json();
 
       if (data.success) {
@@ -204,7 +317,27 @@ export default function ImportPage() {
     setPreviewData(null);
     setColumnMapping({});
     setResult(null);
+    setSelectedSheet("");
+    setPreviewPage(0);
+    setHeaderRow(0);
+    setDataStartRow(1);
+    setDataEndRow(null);
   };
+
+  const isDataRow = (absoluteRowIdx: number) => {
+    if (absoluteRowIdx < dataStartRow) return false;
+    if (dataEndRow !== null && absoluteRowIdx > dataEndRow) return false;
+    return true;
+  };
+
+  const isHeaderRowFn = (absoluteRowIdx: number) => absoluteRowIdx === headerRow;
+
+  const importableRowCount = effectiveDataRows.filter(row => {
+    const arr = Array.isArray(row) ? row : [];
+    return arr.some(cell => cell !== null && cell !== undefined && cell !== "");
+  }).length;
+
+  const hasRequiredFields = !fields.filter(f => f.required).some(f => columnMapping[f.key] === undefined);
 
   return (
     <div className="space-y-6">
@@ -215,27 +348,32 @@ export default function ImportPage() {
 
       {/* Steps indicator */}
       <div className="flex items-center justify-center gap-2">
-        {["upload", "preview", "mapping", "result"].map((s, i) => (
-          <div key={s} className="flex items-center">
+        {[
+          { key: "upload", label: "Subir" },
+          { key: "configure", label: "Configurar" },
+          { key: "result", label: "Resultado" },
+        ].map((s, i) => (
+          <div key={s.key} className="flex items-center">
             <div
-              className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium ${
-                step === s
+              className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium transition-colors ${
+                step === s.key
                   ? "bg-primary text-primary-foreground"
-                  : ["upload", "preview", "mapping", "result"].indexOf(step) > i
-                  ? "bg-accent text-accent-foreground"
+                  : ["upload", "configure", "result"].indexOf(step) > i
+                  ? "bg-primary/20 text-primary"
                   : "bg-muted text-muted-foreground"
               }`}
             >
               {i + 1}
             </div>
-            {i < 3 && (
-              <ArrowRight className="mx-2 h-4 w-4 text-muted-foreground" />
-            )}
+            <span className={`ml-1.5 text-xs font-medium hidden sm:inline ${step === s.key ? "text-primary" : "text-muted-foreground"}`}>
+              {s.label}
+            </span>
+            {i < 2 && <ArrowRight className="mx-3 h-4 w-4 text-muted-foreground" />}
           </div>
         ))}
       </div>
 
-      {/* Step 1: Upload */}
+      {/* ─── Step 1: Upload ─── */}
       {step === "upload" && (
         <Card>
           <CardHeader>
@@ -259,23 +397,20 @@ export default function ImportPage() {
             </div>
 
             <div
-              className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-12 transition-colors ${
-                loading ? "border-primary/50 bg-primary/5" : "border-border hover:border-primary/50"
+              className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-12 transition-colors cursor-pointer ${
+                loading ? "border-primary/50 bg-primary/5" : "border-border hover:border-primary/50 hover:bg-muted/30"
               }`}
               onDrop={handleDrop}
               onDragOver={(e) => e.preventDefault()}
+              onClick={() => !loading && fileInputRef.current?.click()}
             >
               {loading ? (
                 <RefreshCw className="h-12 w-12 animate-spin text-primary" />
               ) : (
                 <>
                   <FileSpreadsheet className="h-12 w-12 text-muted-foreground" />
-                  <p className="mt-4 text-lg font-medium">
-                    Arrastra tu archivo Excel aquí
-                  </p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    o haz clic para seleccionar
-                  </p>
+                  <p className="mt-4 text-lg font-medium">Arrastra tu archivo Excel aquí</p>
+                  <p className="mt-1 text-sm text-muted-foreground">o haz clic para seleccionar (.xlsx, .xls)</p>
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -283,194 +418,379 @@ export default function ImportPage() {
                     onChange={handleFileInput}
                     className="hidden"
                   />
-                  <Button className="mt-4" variant="outline" onClick={() => fileInputRef.current?.click()}>
-                    Seleccionar archivo
-                  </Button>
                 </>
               )}
-            </div>
-
-            <div className="rounded-lg bg-muted/50 p-4">
-              <h4 className="font-medium">Formato esperado para {importType === "materials" ? "Materiales" : "Configuraciones"}:</h4>
-              <ul className="mt-2 list-inside list-disc text-sm text-muted-foreground">
-                {columns.map((col) => (
-                  <li key={col.key}>
-                    {col.label} {col.required && <span className="text-destructive">*</span>}
-                  </li>
-                ))}
-              </ul>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Step 2: Preview */}
-      {step === "preview" && previewData && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <FileSpreadsheet className="h-5 w-5" />
-                Vista Previa
-              </span>
-              <Badge variant="secondary">{previewData.totalRows} filas</Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="max-h-[400px] overflow-auto rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    {previewData.headers.map((header, i) => (
-                      <TableHead key={i} className="whitespace-nowrap">
-                        {header || `Columna ${i + 1}`}
-                      </TableHead>
+      {/* ─── Step 2: Configure (Preview + interactive mapping in one step) ─── */}
+      {step === "configure" && previewData && (
+        <div className="space-y-4">
+          {/* Top config bar */}
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex flex-col gap-4">
+                {/* Sheet selector */}
+                {previewData.sheetNames.length > 1 && (
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <Layers className="h-4 w-4 text-primary" />
+                      Hojas:
+                    </div>
+                    {previewData.sheetsInfo?.map((sheet) => (
+                      <Button
+                        key={sheet.name}
+                        variant={selectedSheet === sheet.name ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => loadSheetData(sheet.name)}
+                        disabled={loading}
+                      >
+                        {loading && selectedSheet === sheet.name ? (
+                          <RefreshCw className="h-3 w-3 animate-spin mr-1" />
+                        ) : (
+                          <FileSpreadsheet className="h-3 w-3 mr-1" />
+                        )}
+                        {sheet.name}
+                        <Badge variant="secondary" className="ml-1 text-xs">{sheet.rowCount}</Badge>
+                      </Button>
                     ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {previewData.rows && previewData.rows.length > 0 ? (
-                    previewData.rows.slice(0, 10).map((row, rowIndex) => {
-                      const rowArray = Array.isArray(row) ? row : [];
+                  </div>
+                )}
+
+                {/* Row range configuration */}
+                <div className="flex flex-wrap items-end gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Fila de encabezados</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={allRawRows.length}
+                      value={headerRow + 1}
+                      onChange={(e) => {
+                        const v = Math.max(0, parseInt(e.target.value || "1") - 1);
+                        setHeaderRow(v);
+                        if (dataStartRow <= v) setDataStartRow(v + 1);
+                      }}
+                      className="w-24 h-9"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Datos desde fila</Label>
+                    <Input
+                      type="number"
+                      min={headerRow + 2}
+                      max={allRawRows.length}
+                      value={dataStartRow + 1}
+                      onChange={(e) => setDataStartRow(Math.max(headerRow + 1, parseInt(e.target.value || "1") - 1))}
+                      className="w-24 h-9"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Hasta fila (vacío = todas)</Label>
+                    <Input
+                      type="number"
+                      min={dataStartRow + 1}
+                      max={allRawRows.length}
+                      value={dataEndRow !== null ? dataEndRow + 1 : ""}
+                      placeholder="Todas"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (!val) {
+                          setDataEndRow(null);
+                        } else {
+                          setDataEndRow(Math.max(dataStartRow, parseInt(val) - 1));
+                        }
+                      }}
+                      className="w-28 h-9"
+                    />
+                  </div>
+                  <Badge variant="outline" className="text-sm px-3 py-1.5 ml-auto">
+                    {importableRowCount} filas a importar
+                  </Badge>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Field assignment instructions + badges */}
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-start gap-3 flex-wrap">
+                <div className="flex items-center gap-2 text-sm font-medium shrink-0 pt-1">
+                  <MousePointerClick className="h-4 w-4 text-primary" />
+                  Hacé clic en los encabezados de columna para asignar:
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {fields.map((field) => {
+                    const isAssigned = columnMapping[field.key] !== undefined;
+                    const assignedColName = isAssigned ? effectiveHeaders[columnMapping[field.key]] : null;
+                    return (
+                      <div
+                        key={field.key}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all ${
+                          isAssigned
+                            ? `${field.color} border-current/30`
+                            : "bg-muted text-muted-foreground border-dashed border-muted-foreground/40"
+                        }`}
+                      >
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${isAssigned ? field.headerColor : "bg-muted-foreground/40"}`} />
+                        {field.label}{field.required ? " *" : ""}
+                        {isAssigned && (
+                          <>
+                            <span className="text-[10px] opacity-70 max-w-[100px] truncate">← {assignedColName}</span>
+                            <button
+                              onClick={() => {
+                                setColumnMapping(prev => {
+                                  const n = { ...prev };
+                                  delete n[field.key];
+                                  return n;
+                                });
+                              }}
+                              className="ml-0.5 hover:opacity-100 opacity-60"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Interactive table */}
+          <Card>
+            <CardContent className="pt-6 px-2 sm:px-6">
+              <div className="overflow-auto rounded-lg border max-h-[500px]">
+                <Table>
+                  <TableHeader className="sticky top-0 z-20">
+                    <TableRow className="bg-muted/80 backdrop-blur">
+                      <TableHead className="w-14 text-center text-xs font-bold sticky left-0 bg-muted/80 backdrop-blur z-30">Fila</TableHead>
+                      {effectiveHeaders.map((header, colIdx) => {
+                        const field = getFieldForCol(colIdx);
+                        return (
+                          <TableHead key={colIdx} className="p-0 min-w-[130px]">
+                            <Popover
+                              open={openPopoverCol === colIdx}
+                              onOpenChange={(open) => setOpenPopoverCol(open ? colIdx : null)}
+                            >
+                              <PopoverTrigger asChild>
+                                <button
+                                  className={`w-full px-3 py-2.5 text-left text-xs font-semibold transition-all hover:bg-primary/10 flex flex-col gap-0.5 border-b-2 ${
+                                    field ? `${field.color} border-current/50` : "border-transparent"
+                                  }`}
+                                >
+                                  <span className="truncate max-w-[180px] block">{header}</span>
+                                  {field ? (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase">
+                                      <span className={`w-1.5 h-1.5 rounded-full ${field.headerColor}`} />
+                                      {field.label}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-muted-foreground/50 italic">clic para asignar</span>
+                                  )}
+                                </button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-52 p-2" align="start">
+                                <div className="space-y-1">
+                                  <p className="text-xs font-medium text-muted-foreground mb-2 px-1">Asignar como:</p>
+                                  {fields.map((f) => {
+                                    const currentlyAssignedCol = columnMapping[f.key];
+                                    const isThisCol = currentlyAssignedCol === colIdx;
+                                    return (
+                                      <button
+                                        key={f.key}
+                                        onClick={() => assignField(colIdx, f.key)}
+                                        className={`w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium transition-colors hover:bg-accent ${
+                                          isThisCol ? f.color : ""
+                                        }`}
+                                      >
+                                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${f.headerColor}`} />
+                                        {f.label}{f.required ? " *" : ""}
+                                        {currentlyAssignedCol !== undefined && !isThisCol && (
+                                          <span className="text-[10px] text-muted-foreground ml-auto">Col {currentlyAssignedCol + 1}</span>
+                                        )}
+                                        {isThisCol && (
+                                          <CheckCircle2 className="h-3 w-3 ml-auto text-primary" />
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                  <div className="border-t mt-1 pt-1">
+                                    <button
+                                      onClick={() => { removeAssignment(colIdx); setOpenPopoverCol(null); }}
+                                      className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent"
+                                    >
+                                      <X className="h-3 w-3" />
+                                      No importar esta columna
+                                    </button>
+                                  </div>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          </TableHead>
+                        );
+                      })}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {displayRows.map((row, displayIdx) => {
+                      const absoluteIdx = previewPage * ROWS_PER_PAGE + displayIdx;
+                      const rowArr = Array.isArray(row) ? row : [];
+                      const isHdr = isHeaderRowFn(absoluteIdx);
+                      const isData = isDataRow(absoluteIdx);
+                      const isOutside = !isHdr && !isData;
+
                       return (
-                        <TableRow key={rowIndex}>
-                          {previewData.headers.map((_, colIndex) => {
-                            const cellValue = rowArray[colIndex];
-                            const displayValue = cellValue !== null && cellValue !== undefined 
-                              ? String(cellValue) 
-                              : "";
+                        <TableRow
+                          key={absoluteIdx}
+                          className={`transition-colors ${
+                            isHdr
+                              ? "bg-primary/10 font-bold"
+                              : isOutside
+                              ? "opacity-30"
+                              : absoluteIdx % 2 === 0
+                              ? "hover:bg-muted/30"
+                              : "bg-muted/10 hover:bg-muted/30"
+                          }`}
+                        >
+                          <TableCell
+                            className={`text-center text-xs font-mono sticky left-0 z-10 border-r ${
+                              isHdr
+                                ? "bg-primary/10 text-primary font-bold"
+                                : isOutside
+                                ? "bg-background text-muted-foreground/40"
+                                : "bg-background text-muted-foreground"
+                            }`}
+                          >
+                            <div className="flex items-center justify-center gap-1">
+                              {absoluteIdx + 1}
+                              {isHdr && (
+                                <Badge variant="outline" className="text-[8px] px-1 py-0 leading-tight border-primary text-primary">H</Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          {effectiveHeaders.map((_, colIdx) => {
+                            const cellValue = colIdx < rowArr.length ? rowArr[colIdx] : undefined;
+                            const display = cellValue !== null && cellValue !== undefined ? String(cellValue) : "";
+                            const field = getFieldForCol(colIdx);
+
                             return (
-                              <TableCell key={colIndex} className="max-w-[200px] truncate">
-                                {displayValue}
+                              <TableCell
+                                key={colIdx}
+                                className={`max-w-[200px] truncate text-xs ${
+                                  field && isData
+                                    ? `${field.color} bg-opacity-20`
+                                    : ""
+                                } ${isHdr ? "font-bold" : ""}`}
+                                title={display}
+                              >
+                                {display || <span className="text-muted-foreground/20">—</span>}
                               </TableCell>
                             );
                           })}
                         </TableRow>
                       );
-                    })
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={previewData.headers.length} className="text-center text-muted-foreground">
-                        No se encontraron filas con datos
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-            {previewData.totalRows > 10 && (
-              <p className="text-center text-sm text-muted-foreground">
-                Mostrando {Math.min(10, previewData.rows?.length || 0)} de {previewData.totalRows} filas
-              </p>
-            )}
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={reset}>
-                Cancelar
-              </Button>
-              <Button onClick={() => setStep("mapping")} disabled={!previewData.rows || previewData.rows.length === 0}>
-                Continuar al mapeo
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Step 3: Column Mapping */}
-      {step === "mapping" && previewData && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Mapeo de Columnas</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <p className="text-sm text-muted-foreground">
-              Selecciona qué columna del Excel corresponde a cada campo del sistema.
-              Los campos marcados con * son requeridos.
-            </p>
-
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {columns.map((col) => (
-                <div key={col.key} className="space-y-2">
-                  <Label>
-                    {col.label}
-                    {col.required && <span className="text-destructive"> *</span>}
-                  </Label>
-                  <Select
-                    value={columnMapping[col.key]?.toString() ?? ""}
-                    onValueChange={(v) => {
-                      const newMapping = { ...columnMapping };
-                      if (v) {
-                        newMapping[col.key] = parseInt(v);
-                      } else {
-                        delete newMapping[col.key];
-                      }
-                      setColumnMapping(newMapping);
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleccionar columna" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">-- No mapear --</SelectItem>
-                      {previewData.headers.map((header, i) => (
-                        <SelectItem key={i} value={i.toString()}>
-                          {header || `Columna ${i + 1}`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ))}
-            </div>
-
-            {/* Preview mapped data */}
-            <div className="rounded-lg border p-4">
-              <h4 className="mb-3 font-medium">Vista previa del mapeo (primera fila):</h4>
-              <div className="grid gap-2 text-sm">
-                {columns.map((col) => {
-                  const idx = columnMapping[col.key];
-                  const value = idx !== undefined && previewData.rows[0] 
-                    ? String((previewData.rows[0] as unknown[])[idx] ?? "-")
-                    : "-";
-                  return (
-                    <div key={col.key} className="flex">
-                      <span className="w-40 font-medium">{col.label}:</span>
-                      <span className="text-muted-foreground">{value}</span>
-                    </div>
-                  );
-                })}
+                    })}
+                  </TableBody>
+                </Table>
               </div>
-            </div>
 
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setStep("preview")}>
-                Volver
-              </Button>
-              <Button onClick={handleImport} disabled={loading}>
-                {loading ? (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    Importando...
-                  </>
-                ) : (
-                  <>
-                    <Download className="mr-2 h-4 w-4" />
-                    Importar {previewData.totalRows} registros
-                  </>
-                )}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between mt-3">
+                  <p className="text-xs text-muted-foreground">
+                    Filas {previewPage * ROWS_PER_PAGE + 1}–{Math.min((previewPage + 1) * ROWS_PER_PAGE, totalDisplayRows)} de {totalDisplayRows}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setPreviewPage(p => Math.max(0, p - 1))} disabled={previewPage === 0}>
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <span className="text-xs text-muted-foreground">{previewPage + 1} / {totalPages}</span>
+                    <Button variant="outline" size="sm" onClick={() => setPreviewPage(p => p + 1)} disabled={previewPage + 1 >= totalPages}>
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Bottom: preview + import */}
+          <Card>
+            <CardContent className="pt-6">
+              {/* Preview first mapped row */}
+              {effectiveDataRows.length > 0 && Object.keys(columnMapping).length > 0 && (
+                <div className="mb-4 rounded-lg border bg-muted/20 p-4">
+                  <h4 className="flex items-center gap-2 text-sm font-medium mb-3">
+                    <Eye className="h-4 w-4 text-primary" />
+                    Vista previa del primer registro:
+                  </h4>
+                  <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+                    {fields.map((field) => {
+                      const colIdx = columnMapping[field.key];
+                      const firstRow = effectiveDataRows[0] as unknown[];
+                      const value = colIdx !== undefined && firstRow
+                        ? String(firstRow[colIdx] ?? "—")
+                        : "—";
+                      return (
+                        <div key={field.key} className="flex items-center gap-2 text-sm">
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${field.headerColor}`} />
+                          <span className="font-medium text-muted-foreground shrink-0">{field.label}:</span>
+                          <span className={`truncate ${colIdx !== undefined ? "" : "text-muted-foreground/50 italic"}`}>
+                            {value}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-between items-center gap-4">
+                <Button variant="outline" onClick={reset}>Cancelar</Button>
+                <div className="flex items-center gap-3">
+                  {!hasRequiredFields && (
+                    <p className="text-xs text-destructive flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      Asigná los campos obligatorios (*)
+                    </p>
+                  )}
+                  <Button
+                    onClick={handleImport}
+                    disabled={loading || !hasRequiredFields || importableRowCount === 0}
+                    size="lg"
+                  >
+                    {loading ? (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                        Importando...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="mr-2 h-4 w-4" />
+                        Importar {importableRowCount} registros
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
-      {/* Step 4: Result */}
+      {/* ─── Step 3: Result ─── */}
       {step === "result" && result && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               {result.imported > 0 ? (
-                <CheckCircle2 className="h-5 w-5 text-accent" />
+                <CheckCircle2 className="h-5 w-5 text-green-500" />
               ) : (
                 <XCircle className="h-5 w-5 text-destructive" />
               )}
@@ -481,21 +801,19 @@ export default function ImportPage() {
             <div className="grid gap-4 sm:grid-cols-3">
               <Card>
                 <CardContent className="pt-6">
-                  <div className="text-3xl font-bold text-accent">{result.imported}</div>
+                  <div className="text-3xl font-bold text-green-600">{result.imported}</div>
                   <p className="text-sm text-muted-foreground">Importados correctamente</p>
                 </CardContent>
               </Card>
               <Card>
                 <CardContent className="pt-6">
                   <div className="text-3xl font-bold">{result.total}</div>
-                  <p className="text-sm text-muted-foreground">Total en archivo</p>
+                  <p className="text-sm text-muted-foreground">Total procesados</p>
                 </CardContent>
               </Card>
               <Card>
                 <CardContent className="pt-6">
-                  <div className="text-3xl font-bold text-destructive">
-                    {result.total - result.imported}
-                  </div>
+                  <div className="text-3xl font-bold text-destructive">{result.total - result.imported}</div>
                   <p className="text-sm text-muted-foreground">Con errores</p>
                 </CardContent>
               </Card>
@@ -513,20 +831,14 @@ export default function ImportPage() {
                   ))}
                 </ul>
                 {result.hasMoreErrors && (
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    ... y más errores
-                  </p>
+                  <p className="mt-2 text-sm text-muted-foreground">... y más errores</p>
                 )}
               </div>
             )}
 
             <div className="flex justify-center gap-4">
-              <Button variant="outline" onClick={reset}>
-                Importar otro archivo
-              </Button>
-              <Button onClick={() => window.location.href = "/dashboard/materiales"}>
-                Ver Materiales
-              </Button>
+              <Button variant="outline" onClick={reset}>Importar otro archivo</Button>
+              <Button onClick={() => window.location.href = "/dashboard/materiales"}>Ver Materiales</Button>
             </div>
           </CardContent>
         </Card>
