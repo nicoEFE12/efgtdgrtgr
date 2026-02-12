@@ -4,6 +4,7 @@ import React from "react"
 
 import { useState } from "react";
 import useSWR from "swr";
+import jsPDF from "jspdf";
 import {
   Plus,
   ArrowDownCircle,
@@ -16,6 +17,7 @@ import {
   Download,
   Filter,
   Trash2,
+  FileSpreadsheet,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -131,6 +133,291 @@ export default function CajaPage() {
       mutate();
     } else {
       toast.error("Error al eliminar movimiento");
+    }
+  }
+
+  function generatePDFReport() {
+    if (!movements || movements.length === 0) {
+      toast.error("No hay movimientos para exportar");
+      return;
+    }
+
+    const pdf = new jsPDF();
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 20;
+    const contentWidth = pageWidth - (2 * margin);
+    
+    // Set up page number tracking
+    let pageNum = 1;
+    
+    const addHeader = () => {
+      // Background header
+      pdf.setFillColor(37, 99, 235);
+      pdf.rect(0, 0, pageWidth, 35, "F");
+      
+      // Company title
+      pdf.setFontSize(22);
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFont(undefined, 'bold');
+      pdf.text("AM SOLUCIONES CONSTRUCTIVAS", margin, 15);
+      
+      // Subtitle
+      pdf.setFontSize(10);
+      pdf.setFont(undefined, 'normal');
+      pdf.text("Reporte de Movimientos de Caja", margin, 24);
+      
+      // Date on header
+      pdf.setFontSize(9);
+      pdf.text(`${new Date().toLocaleDateString('es-AR')}`, pageWidth - margin - 50, 24);
+      
+      // Page number
+      pdf.setFontSize(8);
+      pdf.setTextColor(200, 200, 200);
+      pdf.text(`Página ${pageNum}`, pageWidth - margin - 15, 28);
+      
+      pdf.setTextColor(0, 0, 0);
+    };
+    
+    addHeader();
+    
+    let yPos = 45;
+    
+    // Filters section
+    if (fromDate || toDate || filterMethod !== "all") {
+      pdf.setFontSize(10);
+      pdf.setFont(undefined, 'bold');
+      pdf.setTextColor(100, 100, 100);
+      pdf.text("FILTROS APLICADOS:", margin, yPos);
+      yPos += 7;
+      
+      pdf.setFont(undefined, 'normal');
+      pdf.setFontSize(9);
+      
+      if (fromDate && toDate) {
+        pdf.text(`• Período: ${new Date(fromDate).toLocaleDateString('es-AR')} - ${new Date(toDate).toLocaleDateString('es-AR')}`, margin + 5, yPos);
+        yPos += 5;
+      } else if (fromDate) {
+        pdf.text(`• Desde: ${new Date(fromDate).toLocaleDateString('es-AR')}`, margin + 5, yPos);
+        yPos += 5;
+      } else if (toDate) {
+        pdf.text(`• Hasta: ${new Date(toDate).toLocaleDateString('es-AR')}`, margin + 5, yPos);
+        yPos += 5;
+      }
+      
+      if (filterMethod !== "all") {
+        pdf.text(`• Medio de pago: ${WALLET_CONFIG[filterMethod]?.label || filterMethod}`, margin + 5, yPos);
+        yPos += 5;
+      }
+      
+      yPos += 5;
+    }
+    
+    // Summary box
+    const totalIngresos = movements.filter(m => m.type === 'ingreso').reduce((sum, m) => sum + Number(m.amount), 0);
+    const totalEgresos = movements.filter(m => m.type === 'egreso').reduce((sum, m) => sum + Number(m.amount), 0);
+    const neto = totalIngresos - totalEgresos;
+    
+    // Summary background
+    pdf.setDrawColor(37, 99, 235);
+    pdf.setLineWidth(0.5);
+    pdf.rect(margin, yPos, contentWidth, 25);
+    
+    pdf.setFontSize(10);
+    pdf.setFont(undefined, 'bold');
+    
+    // Ingresos (green)
+    pdf.setTextColor(34, 197, 94);
+    pdf.text("INGRESOS:", margin + 5, yPos + 7);
+    pdf.setFontSize(11);
+    pdf.text(formatCurrency(totalIngresos), margin + 35, yPos + 7);
+    
+    // Egresos (red)
+    pdf.setFontSize(10);
+    pdf.setTextColor(239, 68, 68);
+    pdf.text("EGRESOS:", margin + 5, yPos + 14);
+    pdf.setFontSize(11);
+    pdf.text(formatCurrency(totalEgresos), margin + 35, yPos + 14);
+    
+    // Neto (blue)
+    pdf.setFontSize(10);
+    pdf.setTextColor(37, 99, 235);
+    pdf.text("NETO:", margin + 5, yPos + 21);
+    pdf.setFontSize(12);
+    pdf.text(formatCurrency(neto), margin + 35, yPos + 21);
+    
+    yPos += 32;
+    
+    // Table header with background
+    pdf.setDrawColor(37, 99, 235);
+    pdf.setLineWidth(0.3);
+    pdf.setFillColor(37, 99, 235);
+    pdf.rect(margin, yPos - 1, contentWidth, 8, "F");
+    
+    pdf.setFontSize(9);
+    pdf.setFont(undefined, 'bold');
+    pdf.setTextColor(255, 255, 255);
+    
+    pdf.text("FECHA", margin + 2, yPos + 4);
+    pdf.text("TIPO", margin + 16, yPos + 4);
+    pdf.text("CONCEPTO", margin + 30, yPos + 4);
+    pdf.text("CATEGORÍA", margin + 68, yPos + 4);
+    pdf.text("MEDIO", margin + 103, yPos + 4);
+    pdf.text("MONTO", pageWidth - margin - 3, yPos + 4, { align: "right" });
+    
+    yPos += 10;
+    
+    // Table rows
+    pdf.setFont(undefined, 'normal');
+    pdf.setFontSize(8);
+    pdf.setTextColor(0, 0, 0);
+    
+    let rowCount = 0;
+    movements.forEach((movement, index) => {
+      // Check if we need a new page (accounting for footer)
+      if (yPos > pageHeight - 25) {
+        // Add page number to footer
+        pdf.setFontSize(8);
+        pdf.setTextColor(128, 128, 128);
+        pdf.text("AM Soluciones Constructivas", pageWidth / 2, pageHeight - 10, { align: "center" });
+        
+        // Add new page
+        pdf.addPage();
+        pageNum++;
+        addHeader();
+        yPos = 45;
+      }
+      
+      const fecha = new Date(movement.date).toLocaleDateString('es-AR', { 
+        day: '2-digit', 
+        month: '2-digit',
+        year: '2-digit'
+      });
+      const tipo = movement.type === 'ingreso' ? 'INGRESO' : 'EGRESO';
+      const concepto = movement.concept?.substring(0, 28) || '';
+      const categoria = movement.category?.substring(0, 18) || '';
+      const medio = WALLET_CONFIG[movement.payment_method]?.label?.substring(0, 14) || movement.payment_method.substring(0, 14);
+      const monto = formatCurrency(Number(movement.amount));
+      
+      // Alternate row background for readability
+      if (rowCount % 2 === 0) {
+        pdf.setFillColor(245, 245, 245);
+        pdf.rect(margin, yPos - 2, contentWidth, 6, "F");
+      }
+      
+      // Draw cell borders
+      pdf.setDrawColor(220, 220, 220);
+      pdf.setLineWidth(0.1);
+      pdf.rect(margin, yPos - 2, contentWidth, 6);
+      
+      pdf.text(fecha, margin + 2, yPos + 1.5);
+      
+      // Color code the type
+      if (movement.type === 'ingreso') {
+        pdf.setTextColor(34, 197, 94);
+      } else {
+        pdf.setTextColor(239, 68, 68);
+      }
+      pdf.text(tipo, margin + 16, yPos + 1.5);
+      pdf.setTextColor(0, 0, 0);
+      
+      pdf.text(concepto, margin + 30, yPos + 1.5);
+      pdf.text(categoria, margin + 68, yPos + 1.5);
+      pdf.text(medio, margin + 103, yPos + 1.5);
+      
+      // Color monto
+      if (movement.type === 'ingreso') {
+        pdf.setTextColor(34, 197, 94);
+      } else {
+        pdf.setTextColor(239, 68, 68);
+      }
+      pdf.text(monto, pageWidth - margin - 3, yPos + 1.5, { align: "right" });
+      pdf.setTextColor(0, 0, 0);
+      
+      yPos += 7;
+      rowCount++;
+    });
+    
+    // Footer on last page
+    pdf.setFontSize(8);
+    pdf.setTextColor(128, 128, 128);
+    pdf.text("AM Soluciones Constructivas - Reporte Automatizado", pageWidth / 2, pageHeight - 10, { align: "center" });
+    pdf.text(`Total de movimientos: ${movements.length}`, margin, pageHeight - 10);
+    
+    const fileName = `reporte-movimientos-${new Date().toISOString().split('T')[0]}.pdf`;
+    pdf.save(fileName);
+    
+    toast.success("Reporte PDF generado exitosamente");
+  }
+
+  function generateExcelReport() {
+    if (!movements || movements.length === 0) {
+      toast.error("No hay movimientos para exportar");
+      return;
+    }
+
+    try {
+      // Import XLSX dynamically to avoid SSR issues
+      const XLSX = require('xlsx');
+      
+      // Prepare data with headers
+      const headers = ['Fecha', 'Tipo', 'Concepto', 'Categoría', 'Medio de Pago', 'Cliente', 'Proyecto', 'Monto'];
+      
+      const data = movements.map(movement => [
+        new Date(movement.date).toLocaleDateString('es-AR'),
+        movement.type === 'ingreso' ? 'Ingreso' : 'Egreso',
+        movement.concept || '',
+        movement.category || '',
+        WALLET_CONFIG[movement.payment_method]?.label || movement.payment_method,
+        movement.client_name || '',
+        movement.project_name || '',
+        Number(movement.amount)
+      ]);
+      
+      // Calculate totals
+      const totalIngresos = movements.filter(m => m.type === 'ingreso').reduce((sum, m) => sum + Number(m.amount), 0);
+      const totalEgresos = movements.filter(m => m.type === 'egreso').reduce((sum, m) => sum + Number(m.amount), 0);
+      const neto = totalIngresos - totalEgresos;
+      
+      // Create worksheet data with summary
+      const worksheetData = [
+        headers,
+        ...data,
+        [],
+        ['RESUMEN'],
+        ['Total Ingresos', '', '', '', '', '', '', totalIngresos],
+        ['Total Egresos', '', '', '', '', '', '', totalEgresos],
+        ['Neto', '', '', '', '', '', '', neto]
+      ];
+      
+      // Create worksheet and workbook
+      const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+      
+      // Set column widths
+      worksheet['!cols'] = [
+        { wch: 12 },  // Fecha
+        { wch: 10 },  // Tipo
+        { wch: 20 },  // Concepto
+        { wch: 15 },  // Categoría
+        { wch: 15 },  // Medio de Pago
+        { wch: 20 },  // Cliente
+        { wch: 20 },  // Proyecto
+        { wch: 12 }   // Monto
+      ];
+      
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Movimientos");
+      
+      // Generate filename
+      const filename = `movimientos-caja-${new Date().toISOString().split('T')[0]}.xlsx`;
+      
+      // Write file
+      XLSX.writeFile(workbook, filename);
+      
+      toast.success("Archivo Excel generado correctamente");
+    } catch (error) {
+      console.error("Error generating Excel:", error);
+      toast.error("Error al generar el archivo Excel");
     }
   }
 
@@ -266,6 +553,28 @@ export default function CajaPage() {
               ({movements.length})
             </span>
           </CardTitle>
+          {movements.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={generatePDFReport}
+                className="h-8 px-3 text-xs"
+              >
+                <Download className="mr-1.5 h-3.5 w-3.5" />
+                PDF
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={generateExcelReport}
+                className="h-8 px-3 text-xs"
+              >
+                <FileSpreadsheet className="mr-1.5 h-3.5 w-3.5" />
+                Excel
+              </Button>
+            </div>
+          )}
         </CardHeader>
         <CardContent>
           {isLoading ? (
