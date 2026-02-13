@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import useSWR from "swr";
 import {
   Save,
@@ -18,6 +18,9 @@ import {
   TrendingUp,
   Info,
   ArrowRight,
+  RefreshCw,
+  Timer,
+  TrendingDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,23 +63,44 @@ function formatCurrency(n: number) {
 
 export default function ConfiguracionPage() {
   const { data: settings, mutate } = useSWR("/api/settings", fetcher);
+  const [mounted, setMounted] = useState(false);
   const [companyName, setCompanyName] = useState("");
   const [defaultMargin, setDefaultMargin] = useState("");
-  const [dollarRate, setDollarRate] = useState("");
+  const [dollarRate, setDollarRate] = useState("1000");
   const [costoFijoMensual, setCostoFijoMensual] = useState("");
   const [diasLaborables, setDiasLaborables] = useState("");
   const [cargasSociales, setCargasSociales] = useState("");
   const [saving, setSaving] = useState(false);
+  const [dollarType, setDollarType] = useState("blue");
+  const [fetchingDollar, setFetchingDollar] = useState(false);
+  const [dollarLastUpdate, setDollarLastUpdate] = useState<string | null>(null);
+  const initialFetchDone = useRef(false);
+
+  // Mark component as mounted to avoid hydration mismatch
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (settings) {
       const s = (settings.settings || settings) as Record<string, string>;
       setCompanyName(s.company_name || "Am Soluciones Constructivas");
       setDefaultMargin(s.default_margin_percent || "15");
-      setDollarRate(s.dollar_rate || "1");
+      const rate = s.dollar_rate?.trim();
+      if (rate && rate !== "" && rate !== "0") {
+        setDollarRate(rate);
+      } else {
+        setDollarRate("1000");
+      }
       setCostoFijoMensual(s.costo_fijo_mensual || "0");
       setDiasLaborables(s.dias_laborables_mes || "22");
       setCargasSociales(s.porcentaje_cargas_sociales || "0");
+      
+      // Set dollar type after other settings to avoid triggering fetch
+      const savedDollarType = s.dollar_type || "blue";
+      if (savedDollarType !== dollarType) {
+        setDollarType(savedDollarType);
+      }
     }
   }, [settings]);
 
@@ -115,6 +139,64 @@ export default function ConfiguracionPage() {
     };
   }, [costoFijoMensual, diasLaborables, defaultMargin, cargasSociales]);
 
+  const fetchDollarRate = useCallback(async () => {
+    console.log('fetchDollarRate called manually');
+    setFetchingDollar(true);
+    try {
+      const res = await fetch(`https://dolarapi.com/v1/dolares/${dollarType}`);
+      if (!res.ok) throw new Error("Error al consultar API");
+      
+      const data = await res.json();
+      const venta = data.venta || data.compra;
+      
+      if (venta) {
+        console.log('Updating dollar rate from API:', venta);
+        setDollarRate(venta.toString());
+        const fechaActualizacion = data.fechaActualizacion 
+          ? new Date(data.fechaActualizacion).toLocaleString("es-AR", {
+              dateStyle: "short",
+              timeStyle: "short",
+            })
+          : new Date().toLocaleString("es-AR", {
+              dateStyle: "short",
+              timeStyle: "short",
+            });
+        setDollarLastUpdate(fechaActualizacion);
+        toast.success(`Tipo de cambio actualizado: $${venta}`);
+        
+        // Auto-save the new rate immediately
+        try {
+          const saveRes = await fetch("/api/settings", {
+            method: "PUT", 
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              company_name: companyName,
+              default_margin_percent: defaultMargin,
+              dollar_rate: venta.toString(),
+              dollar_type: dollarType,
+              costo_fijo_mensual: costoFijoMensual,
+              dias_laborables_mes: diasLaborables,
+              porcentaje_cargas_sociales: cargasSociales,
+            }),
+          });
+          if (saveRes.ok) {
+            toast.success("Tipo de cambio guardado automáticamente");
+            mutate(); // Refresh settings
+          }
+        } catch (saveError) {
+          toast.error("Tipo actualizado pero no guardado - usa 'Actualizar configuración'");
+        }
+      } else {
+        toast.error("No se pudo obtener el precio");
+      }
+    } catch (error) {
+      toast.error("Error al consultar la API de dólar");
+      console.error(error);
+    } finally {
+      setFetchingDollar(false);
+    }
+  }, [dollarType, companyName, defaultMargin, costoFijoMensual, diasLaborables, cargasSociales, mutate]);
+
   async function handleSave() {
     setSaving(true);
     try {
@@ -125,6 +207,7 @@ export default function ConfiguracionPage() {
           company_name: companyName,
           default_margin_percent: defaultMargin,
           dollar_rate: dollarRate,
+          dollar_type: dollarType,
           costo_fijo_mensual: costoFijoMensual,
           dias_laborables_mes: diasLaborables,
           porcentaje_cargas_sociales: cargasSociales,
@@ -161,7 +244,7 @@ export default function ConfiguracionPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-6">
               <div className="space-y-2">
                 <Label>Nombre de la Empresa</Label>
                 <Input
@@ -170,21 +253,112 @@ export default function ConfiguracionPage() {
                   placeholder="Mi Empresa S.A."
                 />
               </div>
-              <div className="space-y-2">
+              
+              {/* Dollar Rate Section */}
+              <div className="space-y-3">
                 <Label className="flex items-center gap-2">
                   <DollarSign className="h-4 w-4" />
                   Tipo de Cambio USD
                 </Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={dollarRate}
-                  onChange={(e) => setDollarRate(e.target.value)}
-                  placeholder="1200"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Conversión de precios en dólares a pesos
-                </p>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">Tipo de dólar</Label>
+                    {mounted ? (
+                      <Select value={dollarType} onValueChange={setDollarType}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="oficial">
+                            <div className="flex items-center gap-2">
+                              <Landmark className="h-3 w-3" />
+                              Oficial
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="blue">
+                            <div className="flex items-center gap-2">
+                              <TrendingUp className="h-3 w-3" />
+                              Blue
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="tarjeta">
+                            <div className="flex items-center gap-2">
+                              <DollarSign className="h-3 w-3" />
+                              Tarjeta
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="bolsa">
+                            <div className="flex items-center gap-2">
+                              <TrendingDown className="h-3 w-3" />
+                              MEP / Bolsa
+                            </div>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <div className="flex h-10 items-center rounded-md border border-input bg-background px-3 py-2 text-sm text-muted-foreground">
+                        Cargando...
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">Valor actual (ARS)</Label>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={dollarRate}
+                          onChange={(e) => setDollarRate(e.target.value)}
+                          placeholder="1200"
+                          className="pl-7"
+                        />
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={fetchDollarRate}
+                        disabled={fetchingDollar}
+                        title="Actualizar desde dolarapi.com"
+                      >
+                        {fetchingDollar ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Info bar */}
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Info className="h-3.5 w-3.5 shrink-0" />
+                      <span>Conversión de precios en dólares a pesos argentinos</span>
+                    </div>
+                    {dollarLastUpdate && (
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <Timer className="h-3 w-3 text-green-600" />
+                        <span className="text-muted-foreground">Actualizado:</span>
+                        <span className="font-medium text-green-600">{dollarLastUpdate}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <Badge variant="outline" className="text-[10px] px-2 py-0.5">
+                      <TrendingUp className="h-2.5 w-2.5 mr-1" />
+                      Fuente: dolarapi.com
+                    </Badge>
+                    <span className="text-[10px] text-muted-foreground">
+                      Dólar {dollarType === "oficial" ? "Oficial" : dollarType === "blue" ? "Blue" : dollarType === "tarjeta" ? "Tarjeta" : "MEP"}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </CardContent>
@@ -479,7 +653,7 @@ export default function ConfiguracionPage() {
         </div>
 
         {/* Allowed Emails Management */}
-        <AllowedEmailsSection />
+        <AllowedEmailsSection mounted={mounted} />
       </div>
     </TooltipProvider>
   );
@@ -496,7 +670,7 @@ interface AllowedEmail {
   created_at: string;
 }
 
-function AllowedEmailsSection() {
+function AllowedEmailsSection({ mounted }: { mounted: boolean }) {
   const { data: emails, mutate, isLoading } = useSWR<AllowedEmail[]>(
     "/api/auth/allowed-emails",
     (url: string) => fetch(url).then((r) => {
@@ -591,16 +765,25 @@ function AllowedEmailsSection() {
             className="flex-1"
             onKeyDown={(e) => e.key === "Enter" && handleAdd()}
           />
-          <Select value={newRole} onValueChange={setNewRole}>
-            <SelectTrigger className="w-[120px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="admin">Admin</SelectItem>
-              <SelectItem value="user">Usuario</SelectItem>
-              <SelectItem value="viewer">Visor</SelectItem>
-            </SelectContent>
-          </Select>
+          {mounted ? (
+            <Select value={newRole} onValueChange={setNewRole}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="admin">Admin</SelectItem>
+                <SelectItem value="user">Usuario</SelectItem>
+                <SelectItem value="viewer">Visor</SelectItem>
+              </SelectContent>
+            </Select>
+          ) : (
+            <select
+              className="w-[120px] px-3 py-2 rounded-md border border-input bg-background text-sm"
+              style={{ height: "40px" }}
+            >
+              <option>Cargando...</option>
+            </select>
+          )}
           <Button onClick={handleAdd} disabled={adding} size="sm" className="h-10">
             {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
           </Button>
