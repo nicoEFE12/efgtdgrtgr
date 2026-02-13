@@ -2,7 +2,7 @@
 
 import React from "react"
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import useSWR from "swr";
 import {
   Search,
@@ -89,10 +89,33 @@ export default function MaterialesPage() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [showBulkUpdate, setShowBulkUpdate] = useState(false);
   const [bulkPercentage, setBulkPercentage] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("");
+  const [selectedProvider, setSelectedProvider] = useState("");
+  const [categoryMode, setCategoryMode] = useState<"select" | "create">("select");
+  const [providerMode, setProviderMode] = useState<"select" | "create">("select");
 
   const categories = [
     ...new Set(materials.map((m) => m.categoria).filter(Boolean)),
-  ];
+  ] as string[];
+
+  const providers = [
+    ...new Set(materials.map((m) => m.proveedor).filter(Boolean)),
+  ] as string[];
+
+  // Initialize category and provider states when editing or showing form
+  useEffect(() => {
+    if (editingMaterial) {
+      setSelectedCategory(editingMaterial.categoria || "");
+      setSelectedProvider(editingMaterial.proveedor || "");
+      setCategoryMode("select");
+      setProviderMode("select");
+    } else if (!showForm) {
+      setSelectedCategory("");
+      setSelectedProvider("");
+      setCategoryMode("select");
+      setProviderMode("select");
+    }
+  }, [editingMaterial, showForm]);
 
   const filtered = materials.filter((m) => {
     const matchSearch =
@@ -107,12 +130,17 @@ export default function MaterialesPage() {
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
+    
+    // Get category and provider from state or form
+    const categoria = categoryMode === "select" ? selectedCategory : form.get("categoria_custom");
+    const proveedor = providerMode === "select" ? selectedProvider : form.get("proveedor_custom");
+    
     const body: Record<string, unknown> = {
       nombre: form.get("nombre"),
       unidad: form.get("unidad"),
       precio_unitario: Number(form.get("precio_unitario")),
-      categoria: form.get("categoria") || null,
-      proveedor: form.get("proveedor") || null,
+      categoria: categoria || null,
+      proveedor: proveedor || null,
       codigo_referencia: form.get("codigo_referencia") || null,
     };
 
@@ -133,6 +161,10 @@ export default function MaterialesPage() {
       mutate();
       setShowForm(false);
       setEditingMaterial(null);
+      setSelectedCategory("");
+      setSelectedProvider("");
+      setCategoryMode("select");
+      setProviderMode("select");
     } else {
       toast.error("Error al guardar material");
     }
@@ -159,7 +191,11 @@ export default function MaterialesPage() {
   }
 
   async function handleDeleteMaterial(id: number) {
-    const res = await fetch(`/api/materiales?id=${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/materiales`, { 
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id })
+    });
     if (res.ok) {
       toast.success("Material eliminado");
       mutate();
@@ -290,21 +326,97 @@ export default function MaterialesPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="categoria">Categoria</Label>
-                    <Input
-                      id="categoria"
-                      name="categoria"
-                      defaultValue={editingMaterial?.categoria || ""}
-                      placeholder="Ej: Estructura"
-                    />
+                    {categoryMode === "select" ? (
+                      <Select 
+                        value={selectedCategory} 
+                        onValueChange={(value) => {
+                          if (value === "crear") {
+                            setCategoryMode("create");
+                            setSelectedCategory("");
+                          } else {
+                            setSelectedCategory(value);
+                          }
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Seleccionar categoría" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {categories.map((cat) => (
+                            <SelectItem key={cat} value={cat}>
+                              {cat}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="crear" className="text-blue-600 font-semibold">
+                            + Crear nuevo
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <div className="space-y-2">
+                        <Input
+                          id="categoria_custom"
+                          name="categoria_custom"
+                          placeholder="Nueva categoría"
+                          autoFocus
+                        />
+                        <Button 
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCategoryMode("select")}
+                        >
+                          Usar existente
+                        </Button>
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="proveedor">Proveedor</Label>
-                    <Input
-                      id="proveedor"
-                      name="proveedor"
-                      defaultValue={editingMaterial?.proveedor || ""}
-                      placeholder="Ej: Corralon Norte"
-                    />
+                    {providerMode === "select" ? (
+                      <Select 
+                        value={selectedProvider} 
+                        onValueChange={(value) => {
+                          if (value === "crear") {
+                            setProviderMode("create");
+                            setSelectedProvider("");
+                          } else {
+                            setSelectedProvider(value);
+                          }
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Seleccionar proveedor" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {providers.map((prov) => (
+                            <SelectItem key={prov} value={prov}>
+                              {prov}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="crear" className="text-blue-600 font-semibold">
+                            + Crear nuevo
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <div className="space-y-2">
+                        <Input
+                          id="proveedor_custom"
+                          name="proveedor_custom"
+                          placeholder="Nuevo proveedor"
+                          autoFocus
+                        />
+                        <Button 
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setProviderMode("select")}
+                        >
+                          Usar existente
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="space-y-2">

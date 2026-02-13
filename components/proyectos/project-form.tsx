@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ClientCombobox } from "@/components/ui/client-combobox";
 import { Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 
@@ -72,20 +73,13 @@ export function ProjectForm({ onSuccess }: { onSuccess: () => void }) {
         <Label>
           Cliente <span className="text-destructive">*</span>
         </Label>
-        <Select value={clientId} onValueChange={setClientId} required>
-          <SelectTrigger>
-            <SelectValue placeholder="Seleccionar cliente" />
-          </SelectTrigger>
-          <SelectContent>
-            {clientsData?.clients?.map(
-              (c: { id: number; apellido_nombre: string }) => (
-                <SelectItem key={c.id} value={String(c.id)}>
-                  {c.apellido_nombre}
-                </SelectItem>
-              )
-            )}
-          </SelectContent>
-        </Select>
+        <ClientCombobox
+          clients={clientsData?.clients || []}
+          value={clientId}
+          onValueChange={setClientId}
+          placeholder="Buscar cliente..."
+          emptyText="No se encontró ningún cliente."
+        />
       </div>
 
       <div className="flex flex-col gap-1.5">

@@ -50,6 +50,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { ClientCombobox } from "@/components/ui/client-combobox";
 import {
   Dialog,
   DialogContent,
@@ -1613,18 +1614,13 @@ export default function CotizadorPage() {
                   </div>
                   <div className="space-y-2">
                     <Label>Cliente</Label>
-                    <Select value={clientId} onValueChange={setClientId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Seleccionar cliente..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {clientsList.map((c) => (
-                          <SelectItem key={c.id} value={c.id.toString()}>
-                            {c.apellido_nombre}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <ClientCombobox
+                      clients={clientsList}
+                      value={clientId}
+                      onValueChange={setClientId}
+                      placeholder="Buscar cliente..."
+                      emptyText="No se encontró ningún cliente."
+                    />
                   </div>
                 </div>
                 <div className="space-y-2">

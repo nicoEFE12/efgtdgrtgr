@@ -28,6 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ClientCombobox } from "@/components/ui/client-combobox";
 import {
   Card,
   CardContent,
@@ -425,20 +426,13 @@ export default function NuevoProyectoPage() {
                 <Label>
                   Cliente <span className="text-destructive">*</span>
                 </Label>
-                <Select value={clientId} onValueChange={setClientId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Seleccionar cliente" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {clientsList.map(
-                      (c: { id: number; apellido_nombre: string }) => (
-                        <SelectItem key={c.id} value={String(c.id)}>
-                          {c.apellido_nombre}
-                        </SelectItem>
-                      )
-                    )}
-                  </SelectContent>
-                </Select>
+                <ClientCombobox
+                  clients={clientsList}
+                  value={clientId}
+                  onValueChange={setClientId}
+                  placeholder="Buscar cliente..."
+                  emptyText="No se encontró ningún cliente."
+                />
               </div>
 
               <div className="flex flex-col gap-1.5">

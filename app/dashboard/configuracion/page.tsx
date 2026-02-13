@@ -21,6 +21,9 @@ import {
   RefreshCw,
   Timer,
   TrendingDown,
+  Package,
+  Edit,
+  Tag,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -654,6 +657,12 @@ export default function ConfiguracionPage() {
 
         {/* Allowed Emails Management */}
         <AllowedEmailsSection mounted={mounted} />
+
+        {/* Providers Management */}
+        <ProvidersManagementSection />
+
+        {/* Categories Management */}
+        <CategoriesManagementSection />
       </div>
     </TooltipProvider>
   );
@@ -829,6 +838,462 @@ function AllowedEmailsSection({ mounted }: { mounted: boolean }) {
         ) : (
           <p className="text-sm text-muted-foreground text-center py-4">
             No hay emails autorizados
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ────────────────────────────────────────────────── */
+/* Providers Management Section                       */
+/* ────────────────────────────────────────────────── */
+
+function ProvidersManagementSection() {
+  const { data: materialsData, mutate } = useSWR("/api/materiales", (url: string) =>
+    fetch(url).then((r) => r.json())
+  );
+  const materials = materialsData?.materials || [];
+  const providers = [...new Set(materials.map((m: any) => m.proveedor).filter(Boolean))] as string[];
+
+  const [newProvider, setNewProvider] = useState("");
+  const [editingProvider, setEditingProvider] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  async function handleAdd() {
+    if (!newProvider.trim()) {
+      toast.error("Ingresa un nombre de proveedor");
+      return;
+    }
+    if (providers.includes(newProvider.trim())) {
+      toast.error("Este proveedor ya existe");
+      return;
+    }
+    setAdding(true);
+    try {
+      // Create a marker material with this provider
+      const res = await fetch("/api/materiales", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nombre: `[Referencias] ${newProvider.trim()}`,
+          precio_unitario: 0,
+          unidad: "un",
+          proveedor: newProvider.trim(),
+          categoria: null,
+          codigo_referencia: null,
+        }),
+      });
+      if (res.ok) {
+        toast.success(`Proveedor "${newProvider}" agregado`);
+        setNewProvider("");
+        mutate();
+      } else {
+        toast.error("Error al crear proveedor");
+      }
+    } catch {
+      toast.error("Error al agregar proveedor");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function handleUpdate() {
+    if (!editingProvider || !editName.trim()) return;
+    setUpdating(true);
+    try {
+      const res = await fetch("/api/materiales", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "rename_provider",
+          old_name: editingProvider,
+          new_name: editName.trim(),
+        }),
+      });
+      if (res.ok) {
+        toast.success("Proveedor actualizado en todos los materiales");
+        mutate();
+        setEditingProvider(null);
+        setEditName("");
+      } else {
+        toast.error("Error al actualizar proveedor");
+      }
+    } catch {
+      toast.error("Error de conexión");
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function handleDelete(providerName: string) {
+    setDeleting(providerName);
+    try {
+      const res = await fetch("/api/materiales", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "remove_provider",
+          provider_name: providerName,
+        }),
+      });
+      if (res.ok) {
+        toast.success("Proveedor eliminado de todos los materiales");
+        mutate();
+      } else {
+        toast.error("Error al eliminar proveedor");
+      }
+    } catch {
+      toast.error("Error de conexión");
+    } finally {
+      setDeleting(null);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Package className="h-5 w-5" />
+          Proveedores
+        </CardTitle>
+        <CardDescription>
+          Gestiona los proveedores de materiales
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Add new provider */}
+        <div className="flex gap-2">
+          <Input
+            placeholder="Nuevo proveedor"
+            value={newProvider}
+            onChange={(e) => setNewProvider(e.target.value)}
+            className="flex-1"
+            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+          />
+          <Button onClick={handleAdd} disabled={adding} size="sm" className="h-10">
+            {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+          </Button>
+        </div>
+
+        <Separator />
+
+        {/* List */}
+        {providers.length > 0 ? (
+          <div className="space-y-2">
+            {providers.map((provider) => (
+              <div
+                key={provider}
+                className="flex items-center justify-between rounded-lg border px-3 py-2"
+              >
+                {editingProvider === provider ? (
+                  <div className="flex gap-2 flex-1">
+                    <Input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="h-8"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleUpdate();
+                        if (e.key === "Escape") {
+                          setEditingProvider(null);
+                          setEditName("");
+                        }
+                      }}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleUpdate}
+                      disabled={updating}
+                    >
+                      {updating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setEditingProvider(null);
+                        setEditName("");
+                      }}
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <Package className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">{provider}</span>
+                      <Badge variant="outline" className="text-xs">
+                        {materials.filter((m: any) => m.proveedor === provider).length} materiales
+                      </Badge>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => {
+                          setEditingProvider(provider);
+                          setEditName(provider);
+                        }}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleDelete(provider)}
+                        disabled={deleting === provider}
+                      >
+                        {deleting === provider ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground text-center py-4">
+            No hay proveedores registrados
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ────────────────────────────────────────────────── */
+/* Categories Management Section                      */
+/* ────────────────────────────────────────────────── */
+
+function CategoriesManagementSection() {
+  const { data: materialsData, mutate } = useSWR("/api/materiales", (url: string) =>
+    fetch(url).then((r) => r.json())
+  );
+  const materials = materialsData?.materials || [];
+  const categories = [...new Set(materials.map((m: any) => m.categoria).filter(Boolean))] as string[];
+
+  const [newCategory, setNewCategory] = useState("");
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  async function handleAdd() {
+    if (!newCategory.trim()) {
+      toast.error("Ingresa un nombre de categoría");
+      return;
+    }
+    if (categories.includes(newCategory.trim())) {
+      toast.error("Esta categoría ya existe");
+      return;
+    }
+    setAdding(true);
+    try {
+      // Create a marker material with this category
+      const res = await fetch("/api/materiales", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nombre: `[Referencias] ${newCategory.trim()}`,
+          precio_unitario: 0,
+          unidad: "un",
+          proveedor: null,
+          categoria: newCategory.trim(),
+          codigo_referencia: null,
+        }),
+      });
+      if (res.ok) {
+        toast.success(`Categoría "${newCategory}" agregada`);
+        setNewCategory("");
+        mutate();
+      } else {
+        toast.error("Error al crear categoría");
+      }
+    } catch {
+      toast.error("Error al agregar categoría");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function handleUpdate() {
+    if (!editingCategory || !editName.trim()) return;
+    setUpdating(true);
+    try {
+      const res = await fetch("/api/materiales", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "rename_category",
+          old_name: editingCategory,
+          new_name: editName.trim(),
+        }),
+      });
+      if (res.ok) {
+        toast.success("Categoría actualizada en todos los materiales");
+        mutate();
+        setEditingCategory(null);
+        setEditName("");
+      } else {
+        toast.error("Error al actualizar categoría");
+      }
+    } catch {
+      toast.error("Error de conexión");
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function handleDelete(categoryName: string) {
+    setDeleting(categoryName);
+    try {
+      const res = await fetch("/api/materiales", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "remove_category",
+          category_name: categoryName,
+        }),
+      });
+      if (res.ok) {
+        toast.success("Categoría eliminada de todos los materiales");
+        mutate();
+      } else {
+        toast.error("Error al eliminar categoría");
+      }
+    } catch {
+      toast.error("Error de conexión");
+    } finally {
+      setDeleting(null);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Tag className="h-5 w-5" />
+          Categorías
+        </CardTitle>
+        <CardDescription>
+          Gestiona las categorías de materiales
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Add new category */}
+        <div className="flex gap-2">
+          <Input
+            placeholder="Nueva categoría"
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value)}
+            className="flex-1"
+            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+          />
+          <Button onClick={handleAdd} disabled={adding} size="sm" className="h-10">
+            {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+          </Button>
+        </div>
+
+        <Separator />
+
+        {/* List */}
+        {categories.length > 0 ? (
+          <div className="space-y-2">
+            {categories.map((category) => (
+              <div
+                key={category}
+                className="flex items-center justify-between rounded-lg border px-3 py-2"
+              >
+                {editingCategory === category ? (
+                  <div className="flex gap-2 flex-1">
+                    <Input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="h-8"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleUpdate();
+                        if (e.key === "Escape") {
+                          setEditingCategory(null);
+                          setEditName("");
+                        }
+                      }}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleUpdate}
+                      disabled={updating}
+                    >
+                      {updating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setEditingCategory(null);
+                        setEditName("");
+                      }}
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <Tag className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">{category}</span>
+                      <Badge variant="outline" className="text-xs">
+                        {materials.filter((m: any) => m.categoria === category).length} materiales
+                      </Badge>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => {
+                          setEditingCategory(category);
+                          setEditName(category);
+                        }}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleDelete(category)}
+                        disabled={deleting === category}
+                      >
+                        {deleting === category ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground text-center py-4">
+            No hay categorías registradas
           </p>
         )}
       </CardContent>

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 
@@ -130,6 +130,63 @@ export async function DELETE(request: Request) {
     console.error("Error deleting material:", error);
     return NextResponse.json(
       { error: "Error al eliminar material" },
+      { status: 500 }
+    );
+  }
+}
+export async function PATCH(request: Request) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  }
+
+  try {
+    const body = await request.json();
+    const sql = getDb();
+
+    switch (body.action) {
+      case "rename_provider":
+        await sql`
+          UPDATE materials 
+          SET proveedor = ${body.new_name}
+          WHERE proveedor = ${body.old_name}
+        `;
+        return NextResponse.json({ ok: true });
+
+      case "remove_provider":
+        await sql`
+          UPDATE materials 
+          SET proveedor = NULL
+          WHERE proveedor = ${body.provider_name}
+        `;
+        return NextResponse.json({ ok: true });
+
+      case "rename_category":
+        await sql`
+          UPDATE materials 
+          SET categoria = ${body.new_name}
+          WHERE categoria = ${body.old_name}
+        `;
+        return NextResponse.json({ ok: true });
+
+      case "remove_category":
+        await sql`
+          UPDATE materials 
+          SET categoria = NULL
+          WHERE categoria = ${body.category_name}
+        `;
+        return NextResponse.json({ ok: true });
+
+      default:
+        return NextResponse.json(
+          { error: "Acción no válida" },
+          { status: 400 }
+        );
+    }
+  } catch (error) {
+    console.error("Error in PATCH:", error);
+    return NextResponse.json(
+      { error: "Error al procesar la solicitud" },
       { status: 500 }
     );
   }
