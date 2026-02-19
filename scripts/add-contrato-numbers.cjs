@@ -3,8 +3,14 @@
 
 const { neon } = require("@neondatabase/serverless");
 
-// Usar DATABASE_URL del entorno o proporcionar una directamente
-const DATABASE_URL = process.env.DATABASE_URL || "postgresql://neondb_owner:npg_MVcjSi86brgD@ep-nameless-grass-aiemrddc-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require";
+// Usar DATABASE_URL del entorno
+const DATABASE_URL = process.env.DATABASE_URL;
+
+if (!DATABASE_URL) {
+  console.error("❌ Error: DATABASE_URL no está configurada en las variables de entorno");
+  console.error("   Por favor, configure la variable de entorno DATABASE_URL antes de ejecutar este script");
+  process.exit(1);
+}
 
 async function main() {
   const sql = neon(DATABASE_URL);
