@@ -46,6 +46,7 @@ export async function GET() {
         WHEN 'pendiente' THEN 2 
         WHEN 'cerrado' THEN 3 
       END,
+      p.numero_contrato_auto ASC NULLS LAST,
       p.created_at DESC
   `;
 
@@ -62,12 +63,17 @@ export async function POST(request: Request) {
     const body = await request.json();
     const sql = getDb();
 
+    // Auto-assign contract number
+    const [nextNum] = await sql`SELECT COALESCE(MAX(numero_contrato_auto), 0) + 1 as next_num FROM projects`;
+    const numeroContratoAuto = nextNum.next_num;
+
     const result = await sql`
       INSERT INTO projects (
-        client_id, nombre, numero_contrato, presupuesto_total,
+        client_id, nombre, numero_contrato, numero_contrato_auto, presupuesto_total,
         importe_reservado, estado, fecha_inicio, fecha_cierre, observaciones, quotation_id
       ) VALUES (
         ${body.client_id}, ${body.nombre}, ${body.numero_contrato || ''},
+        ${numeroContratoAuto},
         ${body.presupuesto_total || 0}, ${body.importe_reservado || 0},
         ${body.estado || "pendiente"}, ${body.fecha_inicio || null},
         ${body.fecha_cierre || null}, ${body.observaciones || null},
@@ -77,6 +83,21 @@ export async function POST(request: Request) {
     `;
 
     const projectId = result[0].id;
+
+    // Auto-create a cargo in cuenta_corriente for the project budget
+    const presupuestoTotal = Number(body.presupuesto_total || 0);
+    if (presupuestoTotal > 0 && body.client_id) {
+      await sql`
+        INSERT INTO cuenta_corriente (
+          client_id, type, amount, concept, date, project_id
+        ) VALUES (
+          ${body.client_id}, 'cargo', ${presupuestoTotal},
+          ${`Presupuesto aprobado - ${body.nombre}`},
+          ${body.fecha_inicio || new Date().toISOString().split("T")[0]},
+          ${projectId}
+        )
+      `;
+    }
 
     // Save rubros if provided (from quotation)
     if (body.rubros && body.rubros.length > 0) {

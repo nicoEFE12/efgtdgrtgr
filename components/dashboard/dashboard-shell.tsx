@@ -69,11 +69,6 @@ const NAV_ITEMS = [
     icon: Wrench,
   },
   {
-    label: "Importar Excel",
-    href: "/dashboard/importar",
-    icon: FileUp,
-  },
-  {
     label: "Configuracion",
     href: "/dashboard/configuracion",
     icon: Settings,

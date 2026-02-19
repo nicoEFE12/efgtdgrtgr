@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import Link from "next/link";
@@ -8,10 +9,12 @@ import {
   FolderKanban,
   ArrowRight,
   Settings2,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/dashboard/page-header";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -35,8 +38,19 @@ const STATUS_CONFIG: Record<
 export default function ProyectosPage() {
   const router = useRouter();
   const { data, mutate, isLoading } = useSWR("/api/proyectos", fetcher);
+  const [search, setSearch] = useState("");
 
   const projects = data?.projects || [];
+  const filteredProjects = projects.filter((p: any) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      p.nombre?.toLowerCase().includes(q) ||
+      p.client_name?.toLowerCase().includes(q) ||
+      String(p.numero_contrato_auto || "").includes(q) ||
+      (p.numero_contrato || "").toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div className="flex flex-col gap-6">
@@ -56,6 +70,17 @@ export default function ProyectosPage() {
             Nuevo Proyecto
           </Button>
         </div>
+      </div>
+
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          placeholder="Buscar por nombre, cliente o número de contrato..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-9"
+        />
       </div>
 
       {isLoading ? (
@@ -86,11 +111,13 @@ export default function ProyectosPage() {
         </Card>
       ) : (
         <div className="flex flex-col gap-3">
-          {projects.map(
+          {filteredProjects.map(
             (p: {
               id: number;
               nombre: string;
               numero_contrato: string;
+              numero_contrato_auto: number | null;
+              fecha_inicio: string | null;
               client_name: string;
               estado: string;
               presupuesto_total: number;
@@ -116,6 +143,11 @@ export default function ProyectosPage() {
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
+                          {p.numero_contrato_auto && (
+                            <span className="text-xs font-bold text-muted-foreground">
+                              #{p.numero_contrato_auto}
+                            </span>
+                          )}
                           <h3 className="font-semibold text-foreground">
                             {p.nombre}
                           </h3>
@@ -127,7 +159,10 @@ export default function ProyectosPage() {
                           </Badge>
                         </div>
                         <p className="text-sm text-muted-foreground">
-                          {p.client_name} &middot; {p.numero_contrato}
+                          {p.client_name}
+                          {p.fecha_inicio && (
+                            <> &middot; {new Date(p.fecha_inicio).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" })}</>
+                          )}
                         </p>
                       </div>
                       <div className="hidden text-right sm:block">

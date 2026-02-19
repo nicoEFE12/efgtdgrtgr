@@ -26,6 +26,7 @@ import {
   Paperclip,
   ExternalLink,
   Eye,
+  FolderKanban,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,16 +39,25 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import Link from "next/link";
 import useSWR from "swr";
 import { toast } from "sonner";
 import { ClientForm } from "./client-form";
 import jsPDF from "jspdf";
+import { previewAccountMovementPDF, downloadAccountMovementPDF } from "@/lib/account-movement-pdf";
+import { numberToText } from "@/lib/number-to-text";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -358,20 +368,7 @@ export function ClientDetail({
             domicilio_obra: client.domicilio_obra,
             telefono: client.telefono || "",
             email: client.email || "",
-            presupuesto_observacion: client.presupuesto_observacion || "",
-            fecha_alta: client.fecha_alta
-              ? client.fecha_alta.split("T")[0]
-              : "",
-            denominacion: client.denominacion || "",
-            plan_pago: client.plan_pago || "",
             observaciones: client.observaciones || "",
-            tiempo_obra_estimado: client.tiempo_obra_estimado || "",
-            agenda_inicio: client.agenda_inicio
-              ? client.agenda_inicio.split("T")[0]
-              : "",
-            agenda_cierre: client.agenda_cierre
-              ? client.agenda_cierre.split("T")[0]
-              : "",
           }}
           onSuccess={() => {
             setEditing(false);
@@ -425,7 +422,7 @@ export function ClientDetail({
       <Tabs defaultValue="datos" className="w-full">
         <TabsList className="w-full justify-start">
           <TabsTrigger value="datos">Datos Personales</TabsTrigger>
-          <TabsTrigger value="operacion">Operacion</TabsTrigger>
+          <TabsTrigger value="operacion">Contratos</TabsTrigger>
           <TabsTrigger value="agenda">Agenda</TabsTrigger>
           <TabsTrigger value="cuenta_corriente">Cuenta Corriente</TabsTrigger>
           <TabsTrigger value="notas">
@@ -464,72 +461,31 @@ export function ClientDetail({
         </TabsContent>
 
         <TabsContent value="operacion" className="mt-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <InfoRow
-              icon={<Calendar className="h-4 w-4" />}
-              label="Fecha de Alta"
-              value={
-                client.fecha_alta
-                  ? new Date(client.fecha_alta).toLocaleDateString("es-AR")
-                  : "No registrada"
-              }
-            />
-            <InfoRow
-              icon={<FileText className="h-4 w-4" />}
-              label="Denominacion"
-              value={client.denominacion || "Sin denominacion"}
-            />
-            <div className="sm:col-span-2">
-              <InfoRow
-                label="Plan de Pago"
-                value={client.plan_pago || "No especificado"}
-              />
+          {/* Contratos: mostramos únicamente la lista automática de proyectos asignados al cliente */}
+
+          <div className="mt-6">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h4 className="text-sm font-medium">Contratos (Proyectos)</h4>
+                <p className="text-xs text-muted-foreground">Todos los proyectos asignados a este cliente</p>
+              </div>
+              <div>
+                <Button variant="ghost" size="sm" onClick={() => window.location.href = '/dashboard/proyectos'}>
+                  Ver todos
+                </Button>
+              </div>
             </div>
-            <div className="sm:col-span-2">
-              <InfoRow
-                label="Presupuesto - Observaciones"
-                value={
-                  client.presupuesto_observacion || "Sin observaciones"
-                }
-              />
-            </div>
-            <InfoRow
-              label="Tiempo Estimado"
-              value={client.tiempo_obra_estimado || "No especificado"}
-            />
-            <div className="sm:col-span-2">
-              <InfoRow
-                label="Observaciones"
-                value={client.observaciones || "Sin observaciones"}
-              />
-            </div>
+
+            <ClientProjectsList clientId={client.id} />
           </div>
         </TabsContent>
 
         <TabsContent value="agenda" className="mt-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <InfoRow
-              icon={<Calendar className="h-4 w-4" />}
-              label="Fecha Inicio Prevista"
-              value={
-                client.agenda_inicio
-                  ? new Date(client.agenda_inicio).toLocaleDateString(
-                      "es-AR"
-                    )
-                  : "No definida"
-              }
-            />
-            <InfoRow
-              icon={<Calendar className="h-4 w-4" />}
-              label="Fecha Cierre Prevista"
-              value={
-                client.agenda_cierre
-                  ? new Date(client.agenda_cierre).toLocaleDateString(
-                      "es-AR"
-                    )
-                  : "No definida"
-              }
-            />
+          <div className="space-y-6">
+            <div>
+              <h4 className="text-sm font-semibold mb-4">Fechas de Proyectos</h4>
+              <ClientAgendaFromProjects clientId={client.id} />
+            </div>
           </div>
         </TabsContent>
 
@@ -545,6 +501,53 @@ export function ClientDetail({
           <ArchivosTab clientId={client.id} clientName={client.apellido_nombre} />
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function ClientProjectsList({ clientId }: { clientId: number }) {
+  const { data } = useSWR<{ projects: any[] }>("/api/proyectos", fetcher);
+  const projects = data?.projects || [];
+  const clientProjects = projects.filter((p: any) => p.client_id === clientId);
+
+  if (!data) {
+    return <div className="py-4 text-sm text-muted-foreground">Cargando proyectos…</div>;
+  }
+
+  if (clientProjects.length === 0) {
+    return (
+      <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+        No hay contratos/proyectos para este cliente
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-2">
+      {clientProjects.map((p: any) => (
+        <Link key={p.id} href={`/dashboard/proyectos/${p.id}`} className="block">
+          <Card className="transition-shadow hover:shadow-md cursor-pointer">
+            <CardContent className="flex items-center gap-3 p-3">
+              <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${p.estado === 'activo' ? 'bg-accent/10 text-accent' : 'bg-muted text-muted-foreground'}`}>
+                <FolderKanban className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-medium truncate">{p.nombre}</h4>
+                  <Badge variant={p.estado === 'activo' ? 'default' : 'secondary'} className="text-xs">{p.estado}</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground truncate">
+                  {p.client_name || ''}{p.fecha_inicio ? ` · ${new Date(p.fecha_inicio).toLocaleDateString('es-AR')}` : ''}
+                </p>
+              </div>
+              <div className="hidden sm:block text-right">
+                <p className="text-xs text-muted-foreground">Presupuesto</p>
+                <p className="font-mono text-sm">{formatCurrency(Number(p.presupuesto_total || p.importe_reservado || 0))}</p>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+      ))}
     </div>
   );
 }
@@ -660,15 +663,15 @@ function CuentaCorrienteTab({ clientId }: { clientId: number }) {
     pdf.text("TOTAL CARGADO", margin + boxWidth + 6, summaryBoxY + 6);
     pdf.text(formatCurrency(summary.total_cargado), margin + boxWidth + 6, summaryBoxY + 14);
 
-    // Saldo (Blue)
+    // Saldo pendiente (Blue)
     pdf.setDrawColor(37, 99, 235);
     pdf.setFillColor(219, 234, 254);
     pdf.rect(margin + (boxWidth + 3) * 2, summaryBoxY, boxWidth, 20, "FD");
     pdf.setTextColor(37, 99, 235);
-    pdf.text("SALDO", margin + (boxWidth + 3) * 2 + 3, summaryBoxY + 6);
+    pdf.text("SALDO PENDIENTE", margin + (boxWidth + 3) * 2 + 3, summaryBoxY + 6);
     pdf.setFontSize(12);
     pdf.setFont(undefined, 'bold');
-    pdf.text(formatCurrency(summary.saldo), margin + (boxWidth + 3) * 2 + 3, summaryBoxY + 15);
+    pdf.text(formatCurrency(Math.abs(summary.saldo)), margin + (boxWidth + 3) * 2 + 3, summaryBoxY + 15);
 
     yPos = summaryBoxY + 30;
 
@@ -842,12 +845,12 @@ function CuentaCorrienteTab({ clientId }: { clientId: number }) {
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <DollarSign className="h-4 w-4" />
-              Saldo
+              Saldo pendiente
             </div>
             <p
               className={`mt-2 text-2xl font-bold ${summary.saldo >= 0 ? "text-accent" : "text-destructive"}`}
             >
-              {formatCurrency(summary.saldo)}
+              {formatCurrency(Math.abs(summary.saldo))}
             </p>
           </CardContent>
         </Card>
@@ -1045,13 +1048,57 @@ function CuentaCorrienteTab({ clientId }: { clientId: number }) {
                     )}
                   </div>
                 </div>
-                <div className="text-right">
-                  <p
-                    className={`text-lg font-bold ${mov.type === "cobro" ? "text-accent" : "text-destructive"}`}
-                  >
-                    {mov.type === "cobro" ? "+" : "-"}
-                    {formatCurrency(Number(mov.amount))}
-                  </p>
+                <div className="flex items-center gap-2">
+                  <div className="text-right">
+                    <p
+                      className={`text-lg font-bold ${mov.type === "cobro" ? "text-accent" : "text-destructive"}`}
+                    >
+                      {mov.type === "cobro" ? "+" : "-"}
+                      {formatCurrency(Number(mov.amount))}
+                    </p>
+                  </div>
+                  <div className="flex gap-1">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="Ver recibo"
+                          className="h-6 w-6 p-0"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => previewAccountMovementPDF(mov, clientData?.client?.apellido_nombre || "", false)}>
+                          Ver sin comprobante
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => previewAccountMovementPDF(mov, clientData?.client?.apellido_nombre || "", true)}>
+                          Ver con comprobante
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="Descargar recibo"
+                          className="h-6 w-6 p-0"
+                        >
+                          <Download className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => downloadAccountMovementPDF(mov, clientData?.client?.apellido_nombre || "", false)}>
+                          Descargar sin comprobante
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => downloadAccountMovementPDF(mov, clientData?.client?.apellido_nombre || "", true)}>
+                          Descargar con comprobante
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -1416,6 +1463,109 @@ function ArchivosTab({ clientId, clientName }: { clientId: number; clientName: s
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function ClientAgendaFromProjects({ clientId }: { clientId: number }) {
+  const { data } = useSWR<{ projects: any[] }>("/api/proyectos", fetcher);
+  const projects = data?.projects || [];
+  const clientProjects = projects
+    .filter((p: any) => p.client_id === clientId && p.fecha_inicio)
+    .sort((a: any, b: any) => {
+      const dateA = new Date(a.fecha_inicio).getTime();
+      const dateB = new Date(b.fecha_inicio).getTime();
+      return dateA - dateB;
+    });
+
+  if (!data) {
+    return <div className="py-4 text-sm text-muted-foreground">Cargando...</div>;
+  }
+
+  if (clientProjects.length === 0) {
+    return (
+      <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+        No hay proyectos con fechas de inicio definidas
+      </div>
+    );
+  }
+
+  // Calculate overall date range
+  const allDates = clientProjects
+    .map((p: any) => ({
+      inicio: new Date(p.fecha_inicio),
+      cierre: p.fecha_cierre ? new Date(p.fecha_cierre) : null,
+    }))
+    .filter((d) => d.inicio);
+
+  const minDate = allDates.reduce(
+    (min: Date, d) => (d.inicio < min ? d.inicio : min),
+    allDates[0]?.inicio || new Date()
+  );
+  const maxDate = allDates.reduce((max: Date, d) => {
+    const endDate = d.cierre || d.inicio;
+    return endDate > max ? endDate : max;
+  }, minDate);
+
+  return (
+    <div className="space-y-4">
+      {/* Summary cards */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Card>
+          <CardContent className="p-3">
+            <p className="text-xs text-muted-foreground mb-1">Primera Fecha de Inicio</p>
+            <p className="text-lg font-semibold">
+              {minDate.toLocaleDateString("es-AR")}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-3">
+            <p className="text-xs text-muted-foreground mb-1">Última Fecha de Cierre</p>
+            <p className="text-lg font-semibold">
+              {maxDate.toLocaleDateString("es-AR")}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Timeline of projects */}
+      <div>
+        <h5 className="text-sm font-medium mb-3">Cronograma de Proyectos</h5>
+        <div className="space-y-2">
+          {clientProjects.map((p: any) => (
+            <Link key={p.id} href={`/dashboard/proyectos/${p.id}`}>
+              <Card className="transition-shadow hover:shadow-md cursor-pointer">
+                <CardContent className="p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <h6 className="text-sm font-medium truncate">{p.nombre}</h6>
+                      <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1">
+                          <Calendar className="h-3 w-3" />
+                          Inicio: {new Date(p.fecha_inicio).toLocaleDateString("es-AR")}
+                        </span>
+                        {p.fecha_cierre && (
+                          <span className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3" />
+                            Cierre: {new Date(p.fecha_cierre).toLocaleDateString("es-AR")}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <Badge
+                      variant={p.estado === "activo" ? "default" : "secondary"}
+                      className="flex-shrink-0 text-xs"
+                    >
+                      {p.estado}
+                    </Badge>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

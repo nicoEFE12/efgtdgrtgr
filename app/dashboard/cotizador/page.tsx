@@ -21,6 +21,9 @@ import {
   FolderPlus,
   Download,
   Building2,
+  Edit,
+  Check,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -192,6 +195,23 @@ export default function CotizadorPage() {
   const [showMaterialsList, setShowMaterialsList] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
+
+  // Inline editing states (per-item, local to this cotizador instance)
+  const [editingCost, setEditingCost] = useState<{
+    idx: number;
+    field: "costo_materiales" | "costo_mano_obra" | "costo_fijos_prorrateados";
+    value: number;
+  } | null>(null);
+
+  const [editingMaterialValue, setEditingMaterialValue] = useState<{
+    itemIdx: number;
+    matIdx: number;
+    value: number;
+  } | null>(null);
+
+  // Manual days override for fixed costs
+  const [manualDaysEnabled, setManualDaysEnabled] = useState(false);
+  const [manualDays, setManualDays] = useState<number | null>(null);
 
   const [nombre, setNombre] = useState("");
   const [clientId, setClientId] = useState<string>("");
@@ -376,6 +396,53 @@ export default function CotizadorPage() {
     item.costo_materiales = Math.round(autoCost + customCost);
   }
 
+  // --- Inline-edit helper functions ---
+  function startEditCost(idx: number, field: "costo_materiales" | "costo_mano_obra" | "costo_fijos_prorrateados") {
+    const v = Number(items[idx]?.[field] ?? 0);
+    setEditingCost({ idx, field, value: v });
+  }
+
+  function cancelEditCost() {
+    setEditingCost(null);
+  }
+
+  function saveEditCost() {
+    if (!editingCost) return;
+    const { idx, field, value } = editingCost;
+    updateItem(idx, field, Math.round(Number(value) || 0));
+    setEditingCost(null);
+  }
+
+  function startEditMaterial(itemIdx: number, matIdx: number) {
+    const md = items[itemIdx]?.materiales_detalle?.[matIdx];
+    if (!md) return;
+    setEditingMaterialValue({ itemIdx, matIdx, value: Math.round(md.total) });
+  }
+
+  function cancelEditMaterial() {
+    setEditingMaterialValue(null);
+  }
+
+  function saveEditMaterial() {
+    const em = editingMaterialValue;
+    if (!em) return;
+    const { itemIdx, matIdx, value } = em;
+    const newItems = [...items];
+    const item = { ...newItems[itemIdx] } as QuotationItem;
+    if (!item.materiales_detalle) return;
+    const md = { ...item.materiales_detalle[matIdx] };
+    // update total and adjust precio_unitario if cantidad available
+    md.total = Math.round(Number(value) || 0);
+    if (md.cantidad && md.cantidad > 0) {
+      md.precio_unitario = Math.round((md.total / md.cantidad) * 100) / 100;
+    }
+    item.materiales_detalle[matIdx] = md;
+    recalcMaterialCosts(item);
+    newItems[itemIdx] = recalcSubtotal(item);
+    setItems(newItems);
+    setEditingMaterialValue(null);
+  }
+
   function autoCalcFromServiceType(item: QuotationItem, st: ServiceType) {
     const m2 = Number(item.m2) || 0;
     if (m2 <= 0) return;
@@ -437,6 +504,71 @@ export default function CotizadorPage() {
       item.costo_fijos_prorrateados;
   }
 
+  // Apply manual-days override: distribute fixedTotal (daily * days) across items
+  function applyManualDaysToItems(days: number) {
+    const diario = diasLaborablesMes > 0 ? costoFijoMensual / diasLaborablesMes : 0;
+    const fixedTotal = Math.round(diario * days);
+
+    // base to distribute on: materials + mano_obra per item
+    const variableBase = items.reduce((s, it) => s + (Number(it.costo_materiales) + Number(it.costo_mano_obra)), 0);
+    const newItems = items.map((it) => ({ ...it }));
+
+    if (newItems.length === 0) return;
+
+    if (variableBase > 0) {
+      let assigned = 0;
+      for (let i = 0; i < newItems.length; i++) {
+        const it = newItems[i];
+        const share = (Number(it.costo_materiales) + Number(it.costo_mano_obra)) / variableBase;
+        const val = Math.round(share * fixedTotal);
+        it.costo_fijos_prorrateados = val;
+        it.subtotal = recalcSubtotal(it).subtotal ?? (it.costo_materiales + it.costo_mano_obra + it.costo_fijos_prorrateados);
+        assigned += val;
+      }
+      // fix rounding remainder
+      const diff = fixedTotal - assigned;
+      if (diff !== 0) {
+        newItems[newItems.length - 1].costo_fijos_prorrateados += diff;
+        newItems[newItems.length - 1].subtotal = recalcSubtotal(newItems[newItems.length - 1]).subtotal ?? (newItems[newItems.length - 1].costo_materiales + newItems[newItems.length - 1].costo_mano_obra + newItems[newItems.length - 1].costo_fijos_prorrateados);
+      }
+    } else {
+      // equal distribution fallback
+      const per = Math.floor(fixedTotal / newItems.length);
+      let assigned = 0;
+      for (let i = 0; i < newItems.length; i++) {
+        newItems[i].costo_fijos_prorrateados = per;
+        newItems[i].subtotal = recalcSubtotal(newItems[i]).subtotal ?? (newItems[i].costo_materiales + newItems[i].costo_mano_obra + newItems[i].costo_fijos_prorrateados);
+        assigned += per;
+      }
+      const rem = fixedTotal - assigned;
+      if (rem > 0) {
+        newItems[newItems.length - 1].costo_fijos_prorrateados += rem;
+        newItems[newItems.length - 1].subtotal = recalcSubtotal(newItems[newItems.length - 1]).subtotal ?? (newItems[newItems.length - 1].costo_materiales + newItems[newItems.length - 1].costo_mano_obra + newItems[newItems.length - 1].costo_fijos_prorrateados);
+      }
+    }
+
+    setItems(newItems);
+  }
+
+  function resetFixedCostsToAuto() {
+    const newItems = items.map((it) => ({ ...it }));
+    for (let i = 0; i < newItems.length; i++) {
+      const it = newItems[i];
+      if (it.service_type_id) {
+        const st = serviceTypes.find((s) => s.id === it.service_type_id);
+        if (st) {
+          autoCalcFromServiceType(it, st);
+        }
+      } else {
+        // leave custom materials' fixed at zero unless previously set by user
+        it.costo_fijos_prorrateados = 0;
+        recalcMaterialCosts(it);
+        it.subtotal = recalcSubtotal(it).subtotal ?? (it.costo_materiales + it.costo_mano_obra + it.costo_fijos_prorrateados);
+      }
+    }
+    setItems(newItems);
+  }
+
   function handleM2Change(index: number, value: number | null) {
     const newItems = [...items];
     const item = { ...newItems[index], m2: value };
@@ -461,6 +593,10 @@ export default function CotizadorPage() {
     (s, i) => s + (Number(i.dias_estimados) || 0),
     0
   );
+
+  // Fixed-cost daily calculated from settings (Costo Fijo Diario = Costo Mensual ÷ Días Laborables)
+  const costoFijoDiario = diasLaborablesMes > 0 ? costoFijoMensual / diasLaborablesMes : 0;
+  const fixedTotalManual = manualDaysEnabled ? Math.round(costoFijoDiario * (manualDays || 0)) : null;
 
   const allMaterialsMap: Record<number, MaterialLineItem> = {};
   items.forEach((item) => {
@@ -1854,31 +1990,83 @@ export default function CotizadorPage() {
                             <div className="rounded-lg bg-muted/40 p-3 space-y-2 text-sm">
                               <div className="grid grid-cols-3 gap-3">
                                 <div>
-                                  <p className="text-xs text-muted-foreground mb-1">
+                                  <p className="text-xs text-muted-foreground mb-1 flex items-center gap-2">
                                     Materiales
                                   </p>
-                                  <p className="font-mono font-medium">
-                                    ${formatMoney(item.costo_materiales)}
-                                  </p>
-                                </div>
-                                <div>
-                                  <p className="text-xs text-muted-foreground mb-1">
-                                    Mano de Obra
-                                  </p>
-                                  <p className="font-mono font-medium">
-                                    ${formatMoney(item.costo_mano_obra)}
-                                  </p>
-                                </div>
-                                <div>
-                                  <p className="text-xs text-muted-foreground mb-1">
-                                    Costos Fijos
-                                  </p>
-                                  <p className="font-mono font-medium">
-                                    $
-                                    {formatMoney(
-                                      item.costo_fijos_prorrateados
+                                  <div className="flex items-center gap-2">
+                                    {editingCost && editingCost.idx === idx && editingCost.field === "costo_materiales" ? (
+                                      <div className="flex items-center gap-1">
+                                        <Input type="number" className="w-28 h-7 text-sm" value={editingCost.value}
+                                          onChange={(e) => setEditingCost({ ...editingCost, value: Number(e.target.value) || 0 })}
+                                        />
+                                        <Button size="icon" variant="ghost" onClick={saveEditCost} title="Guardar">
+                                          <Check className="h-4 w-4" />
+                                        </Button>
+                                        <Button size="icon" variant="ghost" onClick={cancelEditCost} title="Cancelar">
+                                          <X className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <p className="font-mono font-medium">${formatMoney(item.costo_materiales)}</p>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEditCost(idx, "costo_materiales")} title="Editar costo materiales">
+                                          <Edit className="h-3.5 w-3.5 text-muted-foreground" />
+                                        </Button>
+                                      </>
                                     )}
-                                  </p>
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <p className="text-xs text-muted-foreground mb-1">Mano de Obra</p>
+                                  <div className="flex items-center gap-2">
+                                    {editingCost && editingCost.idx === idx && editingCost.field === "costo_mano_obra" ? (
+                                      <div className="flex items-center gap-1">
+                                        <Input type="number" className="w-28 h-7 text-sm" value={editingCost.value}
+                                          onChange={(e) => setEditingCost({ ...editingCost, value: Number(e.target.value) || 0 })}
+                                        />
+                                        <Button size="icon" variant="ghost" onClick={saveEditCost} title="Guardar">
+                                          <Check className="h-4 w-4" />
+                                        </Button>
+                                        <Button size="icon" variant="ghost" onClick={cancelEditCost} title="Cancelar">
+                                          <X className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <p className="font-mono font-medium">${formatMoney(item.costo_mano_obra)}</p>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEditCost(idx, "costo_mano_obra")} title="Editar costo mano de obra">
+                                          <Edit className="h-3.5 w-3.5 text-muted-foreground" />
+                                        </Button>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <p className="text-xs text-muted-foreground mb-1">Costos Fijos</p>
+                                  <div className="flex items-center gap-2">
+                                    {editingCost && editingCost.idx === idx && editingCost.field === "costo_fijos_prorrateados" ? (
+                                      <div className="flex items-center gap-1">
+                                        <Input type="number" className="w-28 h-7 text-sm" value={editingCost.value}
+                                          onChange={(e) => setEditingCost({ ...editingCost, value: Number(e.target.value) || 0 })}
+                                        />
+                                        <Button size="icon" variant="ghost" onClick={saveEditCost} title="Guardar">
+                                          <Check className="h-4 w-4" />
+                                        </Button>
+                                        <Button size="icon" variant="ghost" onClick={cancelEditCost} title="Cancelar">
+                                          <X className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <p className="font-mono font-medium">${formatMoney(item.costo_fijos_prorrateados)}</p>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEditCost(idx, "costo_fijos_prorrateados")} title="Editar costos fijos">
+                                          <Edit className="h-3.5 w-3.5 text-muted-foreground" />
+                                        </Button>
+                                      </>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                               {item.materiales_detalle &&
@@ -1896,14 +2084,33 @@ export default function CotizadorPage() {
                                         return (
                                           <div
                                             key={i}
-                                            className="flex justify-between"
+                                            className="flex justify-between items-center gap-3"
                                           >
                                             <span>
                                               {md.nombre} x {cantStr} {md.unidad}
                                             </span>
-                                            <span className="font-mono">
-                                              ${formatMoney(md.total)}
-                                            </span>
+                                            <div className="flex items-center gap-2">
+                                              {editingMaterialValue && editingMaterialValue.itemIdx === idx && editingMaterialValue.matIdx === i ? (
+                                                <div className="flex items-center gap-1">
+                                                  <Input type="number" className="w-28 h-7 text-xs" value={editingMaterialValue.value}
+                                                    onChange={(e) => setEditingMaterialValue({ ...editingMaterialValue, value: Number(e.target.value) || 0 })}
+                                                  />
+                                                  <Button size="icon" variant="ghost" onClick={saveEditMaterial} title="Guardar">
+                                                    <Check className="h-4 w-4" />
+                                                  </Button>
+                                                  <Button size="icon" variant="ghost" onClick={cancelEditMaterial} title="Cancelar">
+                                                    <X className="h-4 w-4" />
+                                                  </Button>
+                                                </div>
+                                              ) : (
+                                                <>
+                                                  <span className="font-mono">${formatMoney(md.total)}</span>
+                                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => startEditMaterial(idx, i)} title="Editar total material">
+                                                    <Edit className="h-3.5 w-3.5 text-muted-foreground" />
+                                                  </Button>
+                                                </>
+                                              )}
+                                            </div>
                                           </div>
                                         );
                                       })}
@@ -2024,17 +2231,55 @@ export default function CotizadorPage() {
                       )}
                     </span>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Costos Fijos</span>
-                    <span className="font-mono tabular-nums">
-                      $
-                      {formatMoney(
-                        items.reduce(
-                          (s, i) => s + Number(i.costo_fijos_prorrateados),
-                          0
-                        )
-                      )}
-                    </span>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-3">
+                        <span className="text-muted-foreground">Costos Fijos</span>
+                        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={manualDaysEnabled}
+                            onChange={(e) => {
+                              const enabled = e.target.checked;
+                              setManualDaysEnabled(enabled);
+                              if (enabled) {
+                                const d = manualDays ?? Math.max(1, Math.ceil(totalDias) || 1);
+                                setManualDays(d);
+                                applyManualDaysToItems(d);
+                              } else {
+                                resetFixedCostsToAuto();
+                                setManualDays(null);
+                              }
+                            }}
+                            className="rounded border-gray-300"
+                          />
+                          Usar días manuales
+                        </label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono tabular-nums">${formatMoney(manualDaysEnabled && fixedTotalManual != null ? fixedTotalManual : items.reduce((s, i) => s + Number(i.costo_fijos_prorrateados), 0))}</span>
+                      </div>
+                    </div>
+
+                    {manualDaysEnabled && (
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-xs text-muted-foreground">Días manuales</div>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            min={1}
+                            value={manualDays ?? undefined}
+                            onChange={(e) => {
+                              const v = Math.max(0, Number(e.target.value) || 0);
+                              setManualDays(v);
+                              applyManualDaysToItems(v);
+                            }}
+                            className="w-20 h-8 text-sm"
+                          />
+                          <div className="text-xs text-muted-foreground">Costo fijo diario: ${formatMoney(Math.round(costoFijoDiario))}</div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <Separator />
@@ -2066,11 +2311,11 @@ export default function CotizadorPage() {
                     ${formatMoney(total)}
                   </span>
                 </div>
-                {totalDias > 0 && (
-                  <p className="text-xs text-muted-foreground text-right">
-                    Duracion estimada: ~{totalDias.toFixed(1)} dias
-                  </p>
-                )}
+                {manualDaysEnabled ? (
+                  <p className="text-xs text-muted-foreground text-right">Plazo manual: {manualDays ?? 0} días hábiles</p>
+                ) : totalDias > 0 ? (
+                  <p className="text-xs text-muted-foreground text-right">Duracion estimada: ~{totalDias.toFixed(1)} dias</p>
+                ) : null}
 
                 <Separator />
                 <div className="space-y-2">
@@ -2219,11 +2464,11 @@ export default function CotizadorPage() {
                       ${formatMoney(total)}
                     </span>
                   </div>
-                  {totalDias > 0 && (
-                    <p className="text-xs text-muted-foreground text-right">
-                      Plazo estimado: ~{Math.ceil(totalDias)} dias habiles
-                    </p>
-                  )}
+                  {manualDaysEnabled ? (
+                    <p className="text-xs text-muted-foreground text-right">Plazo manual: {manualDays ?? 0} días hábiles</p>
+                  ) : totalDias > 0 ? (
+                    <p className="text-xs text-muted-foreground text-right">Plazo estimado: ~{Math.ceil(totalDias)} dias habiles</p>
+                  ) : null}
                 </div>
               </div>
               {notas && (

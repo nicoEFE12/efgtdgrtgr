@@ -65,7 +65,10 @@ interface ServiceType {
   id: number;
   nombre: string;
   descripcion: string | null;
-  rendimiento_m2_dia: number | null;
+  // backwards-compatible: API currently returns rendimiento_m2_dia; unidad_base is optional
+  unidad_base?: "m2" | "m3" | "ml" | "un";
+  rendimiento_base_dia?: number | null;
+  rendimiento_m2_dia?: number | null;
   costo_mano_obra_dia: number | null;
   incluye_cargas_sociales: boolean;
   porcentaje_cargas: number;
@@ -100,6 +103,7 @@ export default function ServiciosPage() {
   const [nombre, setNombre] = useState("");
   const [descripcion, setDescripcion] = useState("");
   const [rendimiento, setRendimiento] = useState("");
+    const [unidadBase, setUnidadBase] = useState<"m2"|"m3"|"ml"|"un">("m2");
   const [costoMODia, setCostoMODia] = useState("");
   const [incluyeCargas, setIncluyeCargas] = useState(false);
   const [pctCargas, setPctCargas] = useState("");
@@ -109,7 +113,7 @@ export default function ServiciosPage() {
   function resetForm() {
     setNombre("");
     setDescripcion("");
-    setRendimiento("");
+    setUnidadBase("m2");
     setCostoMODia("");
     setIncluyeCargas(false);
     setPctCargas("");
@@ -126,7 +130,8 @@ export default function ServiciosPage() {
     setEditingId(st.id);
     setNombre(st.nombre);
     setDescripcion(st.descripcion || "");
-    setRendimiento(st.rendimiento_m2_dia?.toString() || "");
+    setUnidadBase(st.unidad_base || "m2");
+    setRendimiento(st.rendimiento_base_dia?.toString() || "");
     setCostoMODia(st.costo_mano_obra_dia?.toString() || "");
     setIncluyeCargas(st.incluye_cargas_sociales);
     setPctCargas(st.porcentaje_cargas?.toString() || "0");
@@ -175,7 +180,8 @@ export default function ServiciosPage() {
         id: editingId,
         nombre,
         descripcion,
-        rendimiento_m2_dia: rendimiento ? Number(rendimiento) : null,
+        unidad_base: unidadBase,
+        rendimiento_base_dia: rendimiento ? Number(rendimiento) : null,
         costo_mano_obra_dia: costoMODia ? Number(costoMODia) : null,
         incluye_cargas_sociales: incluyeCargas,
         porcentaje_cargas: pctCargas ? Number(pctCargas) : 0,
@@ -289,9 +295,12 @@ export default function ServiciosPage() {
                       Rendimiento
                     </p>
                     <p className="font-medium">
-                      {st.rendimiento_m2_dia
-                        ? `${Number(st.rendimiento_m2_dia)} m²/dia`
-                        : "-"}
+                      {(st.rendimiento_base_dia ?? st.rendimiento_m2_dia) ? `${Number(st.rendimiento_base_dia ?? st.rendimiento_m2_dia)} ${
+                        st.unidad_base === 'm3' ? 'm³' : 
+                        st.unidad_base === 'ml' ? 'ml' : 
+                        st.unidad_base === 'un' ? 'un' : 
+                        'm²'
+                      }/dia` : "-"}
                     </p>
                   </div>
                   <div className="rounded-lg bg-muted/50 p-2">
@@ -354,16 +363,30 @@ export default function ServiciosPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Rendimiento (m²/dia)</Label>
+                <Label>Unidad base de cálculo</Label>
+                <Select value={unidadBase} onValueChange={v => setUnidadBase(v as "m2"|"m3"|"ml"|"un") }>
+                  <SelectTrigger className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="m2">m² (superficie)</SelectItem>
+                    <SelectItem value="m3">m³ (volumen)</SelectItem>
+                    <SelectItem value="ml">ml (metro lineal)</SelectItem>
+                    <SelectItem value="un">un (unidad)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Rendimiento ({unidadBase === "m2" ? "m²" : unidadBase === "m3" ? "m³" : unidadBase === "ml" ? "ml" : "un"}/día)</Label>
                 <Input
                   type="number"
                   step="0.1"
                   value={rendimiento}
                   onChange={(e) => setRendimiento(e.target.value)}
-                  placeholder="Ej: 5"
+                  placeholder={unidadBase === "m2" ? "Ej: 5" : "Ej: 2"}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Cuantos m² se trabajan por dia
+                  Cuántos {unidadBase === "m2" ? "m²" : "m³"} se trabajan por día
                 </p>
               </div>
             </div>
@@ -414,9 +437,9 @@ export default function ServiciosPage() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <Label className="text-base">Materiales por m²</Label>
+                  <Label className="text-base">Materiales requeridos por {unidadBase === "m2" ? "m²" : "m³"} de servicio</Label>
                   <p className="text-sm text-muted-foreground">
-                    Que materiales y en que cantidad se necesitan por cada m²
+                    Agregá los materiales necesarios y la cantidad de cada uno <b>por cada {unidadBase === "m2" ? "m²" : "m³"} de servicio</b>. La unidad depende de cada material (ej: kg, l, un, etc.).
                   </p>
                 </div>
                 <Button size="sm" variant="outline" onClick={addMaterialRow}>
@@ -433,7 +456,7 @@ export default function ServiciosPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Material</TableHead>
-                      <TableHead className="w-32">Cant. por m²</TableHead>
+                      <TableHead className="w-40">Cantidad y unidad por {unidadBase === "m2" ? "m²" : "m³"}</TableHead>
                       <TableHead className="w-28 text-right">
                         Precio Unit.
                       </TableHead>
@@ -441,58 +464,65 @@ export default function ServiciosPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {materiales.map((mat, idx) => (
-                      <TableRow key={idx}>
-                        <TableCell>
-                          <Select
-                            value={mat.material_id?.toString() || ""}
-                            onValueChange={(v) =>
-                              updateMaterialRow(idx, "material_id", Number(v))
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Seleccionar material" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {allMaterials.map((m) => (
-                                <SelectItem key={m.id} value={m.id.toString()}>
-                                  {m.nombre} ({m.unidad})
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            type="number"
-                            step="0.1"
-                            value={mat.cantidad_por_m2 || ""}
-                            onChange={(e) =>
-                              updateMaterialRow(
-                                idx,
-                                "cantidad_por_m2",
-                                Number(e.target.value)
-                              )
-                            }
-                            placeholder="0"
-                          />
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-sm">
-                          {mat.material_precio
-                            ? `$${Number(mat.material_precio).toLocaleString("es-AR")}`
-                            : "-"}
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => removeMaterialRow(idx)}
-                          >
-                            <X className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {materiales.map((mat, idx) => {
+                      const unidad = allMaterials.find((m) => m.id === mat.material_id)?.unidad || "";
+                      return (
+                        <TableRow key={idx}>
+                          <TableCell>
+                            <Select
+                              value={mat.material_id?.toString() || ""}
+                              onValueChange={(v) =>
+                                updateMaterialRow(idx, "material_id", Number(v))
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Seleccionar material" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {allMaterials.map((m) => (
+                                  <SelectItem key={m.id} value={m.id.toString()}>
+                                    {m.nombre} ({m.unidad})
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Input
+                                type="number"
+                                step="0.1"
+                                value={mat.cantidad_por_m2 || ""}
+                                onChange={(e) =>
+                                  updateMaterialRow(
+                                    idx,
+                                    "cantidad_por_m2",
+                                    Number(e.target.value)
+                                  )
+                                }
+                                placeholder="0"
+                                className="w-16"
+                              />
+                              <span className="text-xs text-muted-foreground">{unidad} / {unidadBase === "m2" ? "m²" : "m³"}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {mat.material_precio
+                              ? `$${Number(mat.material_precio).toLocaleString("es-AR")}`
+                              : "-"}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => removeMaterialRow(idx)}
+                            >
+                              <X className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               )}

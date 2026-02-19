@@ -33,6 +33,7 @@ import {
   History,
   Printer,
   Eye,
+  MoreVertical,
 } from "lucide-react";
 import jsPDF from 'jspdf';
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
+import { numberToText } from "@/lib/number-to-text";
 import {
   Dialog,
   DialogContent,
@@ -58,6 +60,12 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -69,6 +77,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { previewProjectMovementPDF, downloadProjectMovementPDF } from "@/lib/project-movement-pdf";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -125,9 +134,20 @@ export default function ProjectDetailPage({
   const { project, movements, summary, rubros } = data;
   const status = STATUS_CONFIG[project.estado] || STATUS_CONFIG.pendiente;
   const totalCobrado = summary.total_cobrado || 0;
+  // Ingresos a obra más lo cobrado al cliente — mejora la precisión del indicador
+  const ingresadoConCobros = Number(summary.total_ingresado || 0) + Number(totalCobrado || 0);
   const resultado = totalCobrado - summary.total_gastado;
   const presupuesto = Number(project.presupuesto_total);
   const rentabilidad = totalCobrado > 0 ? ((totalCobrado - summary.total_gastado) / totalCobrado) * 100 : 0;
+
+  // Friendly labels for wallet/payment methods (show origin/destination caja)
+  const WALLET_LABELS: Record<string, string> = {
+    banco: 'Banco',
+    mercado_pago: 'Mercado Pago',
+    efectivo_pesos: 'Efectivo $',
+    efectivo_usd: 'Efectivo USD',
+    cheque: 'Cheques',
+  };
 
   async function handleDeleteMovement(movementId: number) {
     const res = await fetch(`/api/proyectos/${id}/expenses?movementId=${movementId}`, { method: "DELETE" });
@@ -243,6 +263,18 @@ export default function ProjectDetailPage({
         // Concept (truncate if too long)
         const concept = movement.concept.length > 35 ? movement.concept.substring(0, 32) + "..." : movement.concept;
         doc.text(concept, 50, yPos);
+
+        // If movement includes a source payment method (transfer from caja general), show it
+        if ((movement as any).source_payment_method) {
+          const sp = (movement as any).source_payment_method;
+          const spLabel = WALLET_LABELS[sp] || sp;
+          doc.setFontSize(7);
+          doc.setTextColor(...lightGray);
+          doc.text(`Desde: ${spLabel}`, 50, yPos + 4);
+          doc.setFontSize(8);
+          doc.setTextColor(...darkGray);
+          yPos += 4;
+        }
         
         // Type
         doc.text(isIncome ? "Ingreso" : "Egreso", 120, yPos);
@@ -341,8 +373,9 @@ export default function ProjectDetailPage({
               Ingresado a Obra
             </p>
             <p className="text-xl font-bold text-blue-600">
-              {formatCurrency(summary.total_ingresado)}
+              {formatCurrency(ingresadoConCobros)}
             </p>
+            <p className="mt-1 text-xs text-muted-foreground">Incluye cobros al cliente ({formatCurrency(totalCobrado)})</p>
           </CardContent>
         </Card>
         <Card>
@@ -389,15 +422,42 @@ export default function ProjectDetailPage({
       {/* Saldo de obra card */}
       <Card className={resultado >= 0 ? "border-accent/20" : "border-destructive/20"}>
         <CardContent className="flex items-center justify-between p-4">
-          <div className="flex items-center gap-3">
-            <Wallet className="h-5 w-5 text-muted-foreground" />
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">Ganancia Total del Proyecto</p>
-              <p className={`text-lg font-bold ${resultado >= 0 ? "text-accent" : "text-destructive"}`}>
-                {formatCurrency(resultado)}
-              </p>
+          {/* Left area: Ganancia + Dinero en caja (split) */}
+          <div className="flex-1 flex items-center gap-6">
+            <div className="flex items-center gap-3">
+              <Wallet className="h-5 w-5 text-muted-foreground" />
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Ganancia Total del Proyecto</p>
+                <p className={`text-lg font-bold ${resultado >= 0 ? "text-accent" : "text-destructive"}`}>
+                  {formatCurrency(resultado)}
+                </p>
+              </div>
+            </div>
+
+            <div className="h-12 w-px bg-border" />
+
+            <div className="flex items-center gap-3">
+              <Wallet className="h-5 w-5 text-muted-foreground" />
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Dinero total en caja</p>
+                {(() => {
+                  const ingresado = Number(ingresadoConCobros || 0); // ahora incluye lo cobrado al cliente
+                  const gastado = Number(summary?.total_gastado || 0);
+                  const dineroEnCaja = ingresado - gastado;
+                  return (
+                    <>
+                      <p className={`text-lg font-bold ${dineroEnCaja >= 0 ? "text-accent" : "text-destructive"}`}>
+                        {formatCurrency(dineroEnCaja)}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">Calculado como: Ingresos en caja ({formatCurrency(ingresado)}) − Gastos en caja ({formatCurrency(gastado)})</p>
+                    </>
+                  );
+                })()}
+              </div>
             </div>
           </div>
+
+          {/* Right: quick stats */}
           <div className="text-right text-xs text-muted-foreground">
             <p>Cobrado: {formatCurrency(totalCobrado)}</p>
             <p>Gastado: {formatCurrency(summary.total_gastado)}</p>
@@ -510,6 +570,12 @@ export default function ProjectDetailPage({
                             <span>{m.category}</span>
                           </>
                         )}
+                        {m.source_payment_method && (
+                          <>
+                            <span>&middot;</span>
+                            <span>Desde: {WALLET_LABELS[m.source_payment_method] || m.source_payment_method}</span>
+                          </>
+                        )}
                       </div>
                     </div>
                     <span
@@ -522,27 +588,72 @@ export default function ProjectDetailPage({
                       {m.type === "transferencia_in" || m.type === "ingreso" || m.type === "cobro" ? "+" : "-"}
                       {formatCurrency(Number(m.amount))}
                     </span>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Eliminar Movimiento</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            ¿Estás seguro de eliminar este movimiento? Esta acción no se puede deshacer.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleDeleteMovement(m.id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                            Eliminar
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                    <div className="flex gap-1 items-center">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Ver recibo"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => previewProjectMovementPDF(m, project.nombre, project.client_name, project.numero_contrato, false)}>
+                            Ver sin comprobante
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => previewProjectMovementPDF(m, project.nombre, project.client_name, project.numero_contrato, true)}>
+                            Ver con comprobante
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Descargar recibo"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => downloadProjectMovementPDF(m, project.nombre, project.client_name, project.numero_contrato, false)}>
+                            Descargar sin comprobante
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => downloadProjectMovementPDF(m, project.nombre, project.client_name, project.numero_contrato, true)}>
+                            Descargar con comprobante
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Eliminar Movimiento</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              ¿Estás seguro de eliminar este movimiento? Esta acción no se puede deshacer.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                            <AlertDialogAction 
+                              onClick={() => handleDeleteMovement(m.id)} 
+                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            >
+                              Eliminar
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </div>
                 )
               )}
@@ -614,11 +725,12 @@ export default function ProjectDetailPage({
               </CardHeader>
               <CardContent>
                 <div className="overflow-hidden">
-                  <div className="grid grid-cols-5 pb-3 text-xs font-medium text-muted-foreground border-b">
+                  <div className="grid grid-cols-6 pb-3 text-xs font-medium text-muted-foreground border-b">
                     <div>Fecha</div>
                     <div className="col-span-2">Concepto</div>
                     <div>Tipo</div>
                     <div className="text-right">Importe</div>
+                    <div className="text-right">Acciones</div>
                   </div>
                   <div className="divide-y">
                     {movements?.slice().sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(
@@ -631,7 +743,7 @@ export default function ProjectDetailPage({
                         payment_method: string;
                         category: string | null;
                       }) => (
-                        <div key={m.id} className="grid grid-cols-5 py-3 items-center text-sm">
+                        <div key={m.id} className="grid grid-cols-6 py-3 items-center text-sm">
                           <div className="text-xs text-muted-foreground">
                             {new Date(m.date).toLocaleDateString("es-AR")}
                           </div>
@@ -641,7 +753,10 @@ export default function ProjectDetailPage({
                               <div className="text-xs text-muted-foreground">{m.category}</div>
                             )}
                             {m.payment_method && (
-                              <div className="text-xs text-muted-foreground">{m.payment_method}</div>
+                              <div className="text-xs text-muted-foreground">{WALLET_LABELS[m.payment_method] || m.payment_method}</div>
+                            )}
+                            {m.source_payment_method && (
+                              <div className="text-xs text-muted-foreground">Desde: {WALLET_LABELS[m.source_payment_method] || m.source_payment_method}</div>
                             )}
                           </div>
                           <div>
@@ -667,6 +782,48 @@ export default function ProjectDetailPage({
                               {m.type === "transferencia_in" || m.type === "ingreso" || m.type === "cobro" ? "+" : "-"}
                               {formatCurrency(Number(m.amount))}
                             </span>
+                          </div>
+                          <div className="flex gap-1 justify-end items-center">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  title="Ver recibo"
+                                  className="h-6 w-6 p-0"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => previewProjectMovementPDF(m, project.nombre, project.client_name, project.numero_contrato, false)}>
+                                  Ver sin comprobante
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => previewProjectMovementPDF(m, project.nombre, project.client_name, project.numero_contrato, true)}>
+                                  Ver con comprobante
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  title="Descargar recibo"
+                                  className="h-6 w-6 p-0"
+                                >
+                                  <Download className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => downloadProjectMovementPDF(m, project.nombre, project.client_name, project.numero_contrato, false)}>
+                                  Descargar sin comprobante
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => downloadProjectMovementPDF(m, project.nombre, project.client_name, project.numero_contrato, true)}>
+                                  Descargar con comprobante
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </div>
                       )
@@ -744,7 +901,7 @@ export default function ProjectDetailPage({
       <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Transferencia entre Cajas</DialogTitle>
+            <DialogTitle>Transferencia entre Obras</DialogTitle>
           </DialogHeader>
           <TransferForm
             projectId={Number(id)}
@@ -842,10 +999,17 @@ function TransferForm({
   projectName: string;
   onSuccess: () => void;
 }) {
+  const [transferType, setTransferType] = useState<"from_general" | "between_projects">("from_general");
   const [amount, setAmount] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("banco");
+  const [fromPaymentMethod, setFromPaymentMethod] = useState("banco");
+  const [toProjectId, setToProjectId] = useState("");
+  const [concept, setConcept] = useState("");
+  const [notes, setNotes] = useState("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [loading, setLoading] = useState(false);
+  
+  const { data: projectsData } = useSWR("/api/proyectos", fetcher);
+  const projects = projectsData?.projects || [];
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -856,29 +1020,68 @@ function TransferForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           amount: parseFloat(amount),
-          payment_method: paymentMethod,
+          transfer_type: transferType,
+          from_payment_method: fromPaymentMethod,
+          to_project_id: transferType === "between_projects" ? parseInt(toProjectId) : null,
+          concept: concept || "Transferencia de fondos",
+          notes: notes || null,
           project_name: projectName,
           date,
         }),
       });
-      if (!res.ok) throw new Error("Error en la transferencia");
-      toast.success("Transferencia realizada");
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Error en la transferencia");
+      }
+      toast.success("Transferencia realizada correctamente");
       onSuccess();
-    } catch {
-      toast.error("Error al realizar la transferencia");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Error al realizar la transferencia"
+      );
     } finally {
       setLoading(false);
     }
   }
 
+  const otherProjects = projects.filter((p: any) => p.id !== projectId);
+
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-      <p className="text-sm text-muted-foreground">
-        Se descontara el monto de la Caja General y se acreditara en la caja de
-        esta obra.
-      </p>
+      <div className="rounded-lg border border-blue-200/50 bg-blue-50/30 dark:border-blue-900/40 dark:bg-blue-950/20 p-3 space-y-2">
+        <h4 className="text-sm font-semibold text-blue-900 dark:text-blue-100">Tipo de Transferencia</h4>
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="transfer_type"
+              value="from_general"
+              checked={transferType === "from_general"}
+              onChange={(e) => setTransferType(e.target.value as any)}
+              className="w-4 h-4"
+            />
+            <span className="text-sm">
+              Desde <strong>Caja General</strong> hacia <strong>{projectName}</strong>
+            </span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="transfer_type"
+              value="between_projects"
+              checked={transferType === "between_projects"}
+              onChange={(e) => setTransferType(e.target.value as any)}
+              className="w-4 h-4"
+            />
+            <span className="text-sm">
+              Entre obras
+            </span>
+          </label>
+        </div>
+      </div>
+
       <div className="flex flex-col gap-1.5">
-        <Label>Monto</Label>
+        <Label>Monto <span className="text-destructive">*</span></Label>
         <Input
           type="number"
           step="0.01"
@@ -890,30 +1093,93 @@ function TransferForm({
           className="text-lg font-semibold"
         />
       </div>
+
+      {transferType === "from_general" && (
+        <div className="flex flex-col gap-1.5">
+          <Label>Desde (medio de pago) <span className="text-destructive">*</span></Label>
+          <Select value={fromPaymentMethod} onValueChange={setFromPaymentMethod}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="banco">Banco</SelectItem>
+              <SelectItem value="mercado_pago">Mercado Pago</SelectItem>
+              <SelectItem value="efectivo_pesos">Efectivo $</SelectItem>
+              <SelectItem value="efectivo_usd">Efectivo USD</SelectItem>
+              <SelectItem value="cheque">Cheque</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Se descontará de Caja General y se acreditará a {projectName}
+          </p>
+        </div>
+      )}
+
+      {transferType === "between_projects" && (
+        <div className="flex flex-col gap-1.5">
+          <Label>Hacia Obra <span className="text-destructive">*</span></Label>
+          <Select value={toProjectId} onValueChange={setToProjectId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Seleccionar obra destino" />
+            </SelectTrigger>
+            <SelectContent>
+              {otherProjects.length > 0 ? (
+                otherProjects.map((p: any) => (
+                  <SelectItem key={p.id} value={String(p.id)}>
+                    {p.numero_contrato} - {p.nombre}
+                  </SelectItem>
+                ))
+              ) : (
+                <div className="p-2 text-xs text-muted-foreground">
+                  No hay otras obras disponibles
+                </div>
+              )}
+            </SelectContent>
+          </Select>
+          {toProjectId && (
+            <p className="text-xs text-muted-foreground">
+              Se descontará de <strong>{projectName}</strong> y se acreditará a <strong>{projects.find((p: any) => p.id === parseInt(toProjectId))?.nombre || "la obra seleccionada"}</strong>
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-col gap-1.5">
-        <Label>Desde (medio de pago)</Label>
-        <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="banco">Banco</SelectItem>
-            <SelectItem value="mercado_pago">Mercado Pago</SelectItem>
-            <SelectItem value="efectivo_pesos">Efectivo $</SelectItem>
-            <SelectItem value="efectivo_usd">Efectivo USD</SelectItem>
-            <SelectItem value="cheque">Cheque</SelectItem>
-          </SelectContent>
-        </Select>
+        <Label>Concepto <span className="text-destructive">*</span></Label>
+        <Input
+          value={concept}
+          onChange={(e) => setConcept(e.target.value)}
+          placeholder="Descripción del motivo de la transferencia"
+          className="text-sm"
+        />
       </div>
+
       <div className="flex flex-col gap-1.5">
-        <Label>Fecha</Label>
+        <Label>Notas (opcional)</Label>
+        <Textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={2}
+          placeholder="Detalles adicionales..."
+          className="text-sm"
+        />
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label>Fecha <span className="text-destructive">*</span></Label>
         <Input
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
+          required
         />
       </div>
-      <Button type="submit" disabled={loading}>
+
+      <Button 
+        type="submit" 
+        disabled={loading || (transferType === "between_projects" && !toProjectId)}
+        className="w-full"
+      >
         {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
         Confirmar Transferencia
       </Button>

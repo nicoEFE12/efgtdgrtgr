@@ -24,7 +24,16 @@ import {
   Package,
   Edit,
   Tag,
+  Eye,
 } from "lucide-react";
+
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -689,7 +698,7 @@ function AllowedEmailsSection({ mounted }: { mounted: boolean }) {
     { shouldRetryOnError: false }
   );
   const [newEmail, setNewEmail] = useState("");
-  const [newRole, setNewRole] = useState("user");
+  const [newRole, setNewRole] = useState("admin");
   const [adding, setAdding] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
@@ -715,7 +724,7 @@ function AllowedEmailsSection({ mounted }: { mounted: boolean }) {
       }
       toast.success("Email agregado");
       setNewEmail("");
-      setNewRole("user");
+      setNewRole("admin");
       mutate();
     } catch {
       toast.error("Error de conexión");
@@ -781,8 +790,6 @@ function AllowedEmailsSection({ mounted }: { mounted: boolean }) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="admin">Admin</SelectItem>
-                <SelectItem value="user">Usuario</SelectItem>
-                <SelectItem value="viewer">Visor</SelectItem>
               </SelectContent>
             </Select>
           ) : (
@@ -853,15 +860,47 @@ function ProvidersManagementSection() {
   const { data: materialsData, mutate } = useSWR("/api/materiales", (url: string) =>
     fetch(url).then((r) => r.json())
   );
+  const { data: settingsData, mutate: mutateSettings } = useSWR("/api/settings", fetcher);
+
   const materials = materialsData?.materials || [];
   const providers = [...new Set(materials.map((m: any) => m.proveedor).filter(Boolean))] as string[];
 
+  const settingsMap = (settingsData?.settings || settingsData) as Record<string, string> | undefined;
+  const providerDescMap: Record<string, string> = useMemo(() => {
+    const raw = settingsMap?.provider_descriptions || "{}";
+    try {
+      return JSON.parse(raw || "{}");
+    } catch {
+      return {};
+    }
+  }, [settingsMap]);
+
   const [newProvider, setNewProvider] = useState("");
+  const [newProviderDesc, setNewProviderDesc] = useState("");
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [editProviderDesc, setEditProviderDesc] = useState("");
   const [adding, setAdding] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [viewingProvider, setViewingProvider] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (editingProvider) {
+      setEditProviderDesc(providerDescMap[editingProvider] || "");
+    } else {
+      setEditProviderDesc("");
+    }
+  }, [editingProvider, providerDescMap]);
+
+  async function saveProviderDescriptions(map: Record<string, string>) {
+    await fetch(`/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider_descriptions: JSON.stringify(map) }),
+    });
+    mutateSettings();
+  }
 
   async function handleAdd() {
     if (!newProvider.trim()) {
@@ -888,13 +927,19 @@ function ProvidersManagementSection() {
         }),
       });
       if (res.ok) {
+        // persist description in settings map
+        const updated = { ...providerDescMap, [newProvider.trim()]: (newProviderDesc || "").trim() };
+        await saveProviderDescriptions(updated);
+
         toast.success(`Proveedor "${newProvider}" agregado`);
         setNewProvider("");
+        setNewProviderDesc("");
         mutate();
       } else {
         toast.error("Error al crear proveedor");
       }
-    } catch {
+    } catch (err) {
+      console.error(err);
       toast.error("Error al agregar proveedor");
     } finally {
       setAdding(false);
@@ -915,6 +960,13 @@ function ProvidersManagementSection() {
         }),
       });
       if (res.ok) {
+        // move/update description in settings
+        const updated = { ...providerDescMap };
+        const prevDesc = updated[editingProvider];
+        delete updated[editingProvider];
+        updated[editName.trim()] = (editProviderDesc || prevDesc || "").trim();
+        await saveProviderDescriptions(updated);
+
         toast.success("Proveedor actualizado en todos los materiales");
         mutate();
         setEditingProvider(null);
@@ -922,7 +974,8 @@ function ProvidersManagementSection() {
       } else {
         toast.error("Error al actualizar proveedor");
       }
-    } catch {
+    } catch (err) {
+      console.error(err);
       toast.error("Error de conexión");
     } finally {
       setUpdating(false);
@@ -941,12 +994,18 @@ function ProvidersManagementSection() {
         }),
       });
       if (res.ok) {
+        // remove description
+        const updated = { ...providerDescMap };
+        delete updated[providerName];
+        await saveProviderDescriptions(updated);
+
         toast.success("Proveedor eliminado de todos los materiales");
         mutate();
       } else {
         toast.error("Error al eliminar proveedor");
       }
-    } catch {
+    } catch (err) {
+      console.error(err);
       toast.error("Error de conexión");
     } finally {
       setDeleting(null);
@@ -954,122 +1013,180 @@ function ProvidersManagementSection() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Package className="h-5 w-5" />
-          Proveedores
-        </CardTitle>
-        <CardDescription>
-          Gestiona los proveedores de materiales
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Add new provider */}
-        <div className="flex gap-2">
-          <Input
-            placeholder="Nuevo proveedor"
-            value={newProvider}
-            onChange={(e) => setNewProvider(e.target.value)}
-            className="flex-1"
-            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-          />
-          <Button onClick={handleAdd} disabled={adding} size="sm" className="h-10">
-            {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-          </Button>
-        </div>
-
-        <Separator />
-
-        {/* List */}
-        {providers.length > 0 ? (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Package className="h-5 w-5" />
+            Proveedores
+          </CardTitle>
+          <CardDescription>
+            Gestiona los proveedores de materiales
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Add new provider */}
           <div className="space-y-2">
-            {providers.map((provider) => (
-              <div
-                key={provider}
-                className="flex items-center justify-between rounded-lg border px-3 py-2"
-              >
-                {editingProvider === provider ? (
-                  <div className="flex gap-2 flex-1">
-                    <Input
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="h-8"
-                      autoFocus
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleUpdate();
-                        if (e.key === "Escape") {
-                          setEditingProvider(null);
-                          setEditName("");
-                        }
-                      }}
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleUpdate}
-                      disabled={updating}
-                    >
-                      {updating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar"}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setEditingProvider(null);
-                        setEditName("");
-                      }}
-                    >
-                      Cancelar
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-3">
-                      <Package className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">{provider}</span>
-                      <Badge variant="outline" className="text-xs">
-                        {materials.filter((m: any) => m.proveedor === provider).length} materiales
-                      </Badge>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Nuevo proveedor"
+                value={newProvider}
+                onChange={(e) => setNewProvider(e.target.value)}
+                className="flex-1"
+                onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+              />
+              <Button onClick={handleAdd} disabled={adding} size="sm" className="h-10">
+                {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              </Button>
+            </div>
+            <Input
+              placeholder="Descripción (opcional)"
+              value={newProviderDesc}
+              onChange={(e) => setNewProviderDesc(e.target.value)}
+              className="text-sm"
+            />
+          </div>
+
+          <Separator />
+
+          {/* List */}
+          {providers.length > 0 ? (
+            <div className="space-y-2">
+              {providers.map((provider) => (
+                <div
+                  key={provider}
+                  className="flex items-center justify-between rounded-lg border px-3 py-2"
+                >
+                  {editingProvider === provider ? (
+                    <div className="flex-1 space-y-2">
+                      <div className="flex gap-2">
+                        <Input
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className="h-8 flex-1"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleUpdate();
+                            if (e.key === "Escape") {
+                              setEditingProvider(null);
+                              setEditName("");
+                            }
+                          }}
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleUpdate}
+                          disabled={updating}
+                        >
+                          {updating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar"}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setEditingProvider(null);
+                            setEditName("");
+                          }}
+                        >
+                          Cancelar
+                        </Button>
+                      </div>
+                      <Input
+                        placeholder="Descripción (opcional)"
+                        value={editProviderDesc}
+                        onChange={(e) => setEditProviderDesc(e.target.value)}
+                        className="text-sm"
+                      />
                     </div>
-                    <div className="flex gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => {
-                          setEditingProvider(provider);
-                          setEditName(provider);
-                        }}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        onClick={() => handleDelete(provider)}
-                        disabled={deleting === provider}
-                      >
-                        {deleting === provider ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
-                  </>
-                )}
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-3">
+                        <Package className="h-4 w-4 text-muted-foreground" />
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium">{provider}</span>
+                            <Badge variant="outline" className="text-xs">
+                              {materials.filter((m: any) => m.proveedor === provider).length} materiales
+                            </Badge>
+                          </div>
+                          {providerDescMap[provider] && (
+                            <div className="text-xs text-muted-foreground mt-1">{providerDescMap[provider]}</div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => setViewingProvider(provider)}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => {
+                            setEditingProvider(provider);
+                            setEditName(provider);
+                          }}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => handleDelete(provider)}
+                          disabled={deleting === provider}
+                        >
+                          {deleting === provider ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No hay proveedores registrados
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Dialog: materiales por proveedor */}
+      <Dialog open={!!viewingProvider} onOpenChange={(open) => !open && setViewingProvider(null)}>
+        <DialogContent className="max-w-2xl max-h-[70vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle>Materiales — {viewingProvider}</DialogTitle>
+            <DialogDescription>
+              Lista de materiales asociados al proveedor seleccionado
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-4 space-y-2">
+            {(materials.filter((m: any) => m.proveedor === viewingProvider) || []).map((m: any) => (
+              <div key={m.id} className="flex items-center justify-between">
+                <div className="text-sm">{m.nombre}</div>
+                <div className="text-xs text-muted-foreground">{m.unidad} · ${Number(m.precio_unitario).toFixed(2)}</div>
               </div>
             ))}
+            {materials.filter((m: any) => m.proveedor === viewingProvider).length === 0 && (
+              <div className="text-sm text-muted-foreground">No hay materiales para este proveedor</div>
+            )}
           </div>
-        ) : (
-          <p className="text-sm text-muted-foreground text-center py-4">
-            No hay proveedores registrados
-          </p>
-        )}
-      </CardContent>
-    </Card>
+
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -1081,15 +1198,47 @@ function CategoriesManagementSection() {
   const { data: materialsData, mutate } = useSWR("/api/materiales", (url: string) =>
     fetch(url).then((r) => r.json())
   );
+  const { data: settingsData, mutate: mutateSettings } = useSWR("/api/settings", fetcher);
+
   const materials = materialsData?.materials || [];
   const categories = [...new Set(materials.map((m: any) => m.categoria).filter(Boolean))] as string[];
 
+  const settingsMap = (settingsData?.settings || settingsData) as Record<string, string> | undefined;
+  const categoryDescMap: Record<string, string> = useMemo(() => {
+    const raw = settingsMap?.category_descriptions || "{}";
+    try {
+      return JSON.parse(raw || "{}");
+    } catch {
+      return {};
+    }
+  }, [settingsMap]);
+
   const [newCategory, setNewCategory] = useState("");
+  const [newCategoryDesc, setNewCategoryDesc] = useState("");
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [editCategoryDesc, setEditCategoryDesc] = useState("");
   const [adding, setAdding] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [viewingCategory, setViewingCategory] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (editingCategory) {
+      setEditCategoryDesc(categoryDescMap[editingCategory] || "");
+    } else {
+      setEditCategoryDesc("");
+    }
+  }, [editingCategory, categoryDescMap]);
+
+  async function saveCategoryDescriptions(map: Record<string, string>) {
+    await fetch(`/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category_descriptions: JSON.stringify(map) }),
+    });
+    mutateSettings();
+  }
 
   async function handleAdd() {
     if (!newCategory.trim()) {
@@ -1116,13 +1265,18 @@ function CategoriesManagementSection() {
         }),
       });
       if (res.ok) {
+        const updated = { ...categoryDescMap, [newCategory.trim()]: (newCategoryDesc || "").trim() };
+        await saveCategoryDescriptions(updated);
+
         toast.success(`Categoría "${newCategory}" agregada`);
         setNewCategory("");
+        setNewCategoryDesc("");
         mutate();
       } else {
         toast.error("Error al crear categoría");
       }
-    } catch {
+    } catch (err) {
+      console.error(err);
       toast.error("Error al agregar categoría");
     } finally {
       setAdding(false);
@@ -1143,6 +1297,12 @@ function CategoriesManagementSection() {
         }),
       });
       if (res.ok) {
+        const updated = { ...categoryDescMap };
+        const prevDesc = updated[editingCategory];
+        delete updated[editingCategory];
+        updated[editName.trim()] = (editCategoryDesc || prevDesc || "").trim();
+        await saveCategoryDescriptions(updated);
+
         toast.success("Categoría actualizada en todos los materiales");
         mutate();
         setEditingCategory(null);
@@ -1150,7 +1310,8 @@ function CategoriesManagementSection() {
       } else {
         toast.error("Error al actualizar categoría");
       }
-    } catch {
+    } catch (err) {
+      console.error(err);
       toast.error("Error de conexión");
     } finally {
       setUpdating(false);
@@ -1169,12 +1330,17 @@ function CategoriesManagementSection() {
         }),
       });
       if (res.ok) {
+        const updated = { ...categoryDescMap };
+        delete updated[categoryName];
+        await saveCategoryDescriptions(updated);
+
         toast.success("Categoría eliminada de todos los materiales");
         mutate();
       } else {
         toast.error("Error al eliminar categoría");
       }
-    } catch {
+    } catch (err) {
+      console.error(err);
       toast.error("Error de conexión");
     } finally {
       setDeleting(null);
@@ -1182,121 +1348,179 @@ function CategoriesManagementSection() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Tag className="h-5 w-5" />
-          Categorías
-        </CardTitle>
-        <CardDescription>
-          Gestiona las categorías de materiales
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Add new category */}
-        <div className="flex gap-2">
-          <Input
-            placeholder="Nueva categoría"
-            value={newCategory}
-            onChange={(e) => setNewCategory(e.target.value)}
-            className="flex-1"
-            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-          />
-          <Button onClick={handleAdd} disabled={adding} size="sm" className="h-10">
-            {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-          </Button>
-        </div>
-
-        <Separator />
-
-        {/* List */}
-        {categories.length > 0 ? (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Tag className="h-5 w-5" />
+            Categorías
+          </CardTitle>
+          <CardDescription>
+            Gestiona las categorías de materiales
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Add new category */}
           <div className="space-y-2">
-            {categories.map((category) => (
-              <div
-                key={category}
-                className="flex items-center justify-between rounded-lg border px-3 py-2"
-              >
-                {editingCategory === category ? (
-                  <div className="flex gap-2 flex-1">
-                    <Input
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="h-8"
-                      autoFocus
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleUpdate();
-                        if (e.key === "Escape") {
-                          setEditingCategory(null);
-                          setEditName("");
-                        }
-                      }}
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleUpdate}
-                      disabled={updating}
-                    >
-                      {updating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar"}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setEditingCategory(null);
-                        setEditName("");
-                      }}
-                    >
-                      Cancelar
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-3">
-                      <Tag className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">{category}</span>
-                      <Badge variant="outline" className="text-xs">
-                        {materials.filter((m: any) => m.categoria === category).length} materiales
-                      </Badge>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Nueva categoría"
+                value={newCategory}
+                onChange={(e) => setNewCategory(e.target.value)}
+                className="flex-1"
+                onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+              />
+              <Button onClick={handleAdd} disabled={adding} size="sm" className="h-10">
+                {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              </Button>
+            </div>
+            <Input
+              placeholder="Descripción (opcional)"
+              value={newCategoryDesc}
+              onChange={(e) => setNewCategoryDesc(e.target.value)}
+              className="text-sm"
+            />
+          </div>
+
+          <Separator />
+
+          {/* List */}
+          {categories.length > 0 ? (
+            <div className="space-y-2">
+              {categories.map((category) => (
+                <div
+                  key={category}
+                  className="flex items-center justify-between rounded-lg border px-3 py-2"
+                >
+                  {editingCategory === category ? (
+                    <div className="flex-1 space-y-2">
+                      <div className="flex gap-2">
+                        <Input
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className="h-8 flex-1"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleUpdate();
+                            if (e.key === "Escape") {
+                              setEditingCategory(null);
+                              setEditName("");
+                            }
+                          }}
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleUpdate}
+                          disabled={updating}
+                        >
+                          {updating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar"}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setEditingCategory(null);
+                            setEditName("");
+                          }}
+                        >
+                          Cancelar
+                        </Button>
+                      </div>
+                      <Input
+                        placeholder="Descripción (opcional)"
+                        value={editCategoryDesc}
+                        onChange={(e) => setEditCategoryDesc(e.target.value)}
+                        className="text-sm"
+                      />
                     </div>
-                    <div className="flex gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => {
-                          setEditingCategory(category);
-                          setEditName(category);
-                        }}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        onClick={() => handleDelete(category)}
-                        disabled={deleting === category}
-                      >
-                        {deleting === category ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
-                  </>
-                )}
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-3">
+                        <Tag className="h-4 w-4 text-muted-foreground" />
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium">{category}</span>
+                            <Badge variant="outline" className="text-xs">
+                              {materials.filter((m: any) => m.categoria === category).length} materiales
+                            </Badge>
+                          </div>
+                          {categoryDescMap[category] && (
+                            <div className="text-xs text-muted-foreground mt-1">{categoryDescMap[category]}</div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => setViewingCategory(category)}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => {
+                            setEditingCategory(category);
+                            setEditName(category);
+                          }}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => handleDelete(category)}
+                          disabled={deleting === category}
+                        >
+                          {deleting === category ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No hay categorías registradas
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Dialog: materiales por categoría */}
+      <Dialog open={!!viewingCategory} onOpenChange={(open) => !open && setViewingCategory(null)}>
+        <DialogContent className="max-w-2xl max-h-[70vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle>Materiales — {viewingCategory}</DialogTitle>
+            <DialogDescription>
+              Lista de materiales asociados a la categoría seleccionada
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-4 space-y-2">
+            {(materials.filter((m: any) => m.categoria === viewingCategory) || []).map((m: any) => (
+              <div key={m.id} className="flex items-center justify-between">
+                <div className="text-sm">{m.nombre}</div>
+                <div className="text-xs text-muted-foreground">{m.unidad} · ${Number(m.precio_unitario).toFixed(2)}</div>
               </div>
             ))}
+            {materials.filter((m: any) => m.categoria === viewingCategory).length === 0 && (
+              <div className="text-sm text-muted-foreground">No hay materiales para esta categoría</div>
+            )}
           </div>
-        ) : (
-          <p className="text-sm text-muted-foreground text-center py-4">
-            No hay categorías registradas
-          </p>
-        )}
-      </CardContent>
-    </Card>
+
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

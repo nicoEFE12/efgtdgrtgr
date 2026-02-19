@@ -29,19 +29,24 @@ export async function GET(
   }
 
   // Get project cash movements (including cobros from cuenta_corriente)
+  // include source info when a project_cash_movement references a cash_movements row
   const movements = await sql`
     SELECT 
-      id, 
-      type, 
-      amount, 
-      concept, 
-      date, 
-      payment_method, 
-      category, 
-      created_at,
-      'project_cash_movements' as source
-    FROM project_cash_movements
-    WHERE project_id = ${id}
+      pcm.id,
+      pcm.type,
+      pcm.amount,
+      pcm.concept,
+      pcm.date,
+      pcm.payment_method,
+      pcm.category,
+      pcm.created_at,
+      'project_cash_movements' as source,
+      cm.payment_method as source_payment_method,
+      cm.currency as source_currency,
+      cm.id as source_cash_movement_id
+    FROM project_cash_movements pcm
+    LEFT JOIN cash_movements cm ON pcm.source_cash_movement_id = cm.id
+    WHERE pcm.project_id = ${id}
     
     UNION ALL
     
@@ -54,7 +59,10 @@ export async function GET(
       payment_method, 
       'Cobro' as category, 
       created_at,
-      'cuenta_corriente' as source
+      'cuenta_corriente' as source,
+      NULL as source_payment_method,
+      NULL as source_currency,
+      NULL as source_cash_movement_id
     FROM cuenta_corriente
     WHERE client_id = ${projects[0].client_id}
       AND type = 'cobro'

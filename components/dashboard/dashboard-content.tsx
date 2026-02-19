@@ -21,6 +21,8 @@ import {
 import Image from "next/image";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ExchangeRateCard } from "./exchange-rate-card";
+import { WalletGrid } from "@/components/caja/wallet-grid";
 
 interface DashboardData {
   clientesActivos: number;
@@ -59,6 +61,12 @@ function formatCurrency(amount: number, currency = "ARS") {
 
 export function DashboardContent({ data }: { data: DashboardData }) {
   const router = useRouter();
+  const [walletRefresh, setWalletRefresh] = React.useState(0);
+  
+  const handleTransferComplete = async () => {
+    // Trigger a refresh of wallet data
+    setWalletRefresh(prev => prev + 1);
+  };
 
   const modules = [
     {
@@ -223,48 +231,19 @@ export function DashboardContent({ data }: { data: DashboardData }) {
         </div>
       </div>
 
-      {/* Wallets */}
+      {/* Wallets with Transfer Options */}
       <div>
         <h2 className="mb-3 text-lg font-semibold text-foreground">
           Saldos por Billetera
         </h2>
-        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
-          {Object.entries(WALLET_CONFIG).map(([key, config]) => {
-            const amount = data.wallets[key] || 0;
-            const isPositive = amount >= 0;
-            return (
-              <Card key={key}>
-                <CardContent className="flex items-center gap-3 p-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                    <config.icon className="h-5 w-5 text-primary" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      {config.label}
-                    </p>
-                    <p
-                      className={`text-lg font-bold ${isPositive ? "text-foreground" : "text-destructive"}`}
-                    >
-                      {key === "efectivo_usd"
-                        ? formatCurrency(amount, "USD")
-                        : formatCurrency(amount)}
-                    </p>
-                  </div>
-                  {amount !== 0 && (
-                    <div>
-                      {isPositive ? (
-                        <ArrowUpRight className="h-4 w-4 text-accent" />
-                      ) : (
-                        <ArrowDownRight className="h-4 w-4 text-destructive" />
-                      )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+        <WalletGrid 
+          balances={data.wallets} 
+          onTransfer={handleTransferComplete}
+        />
       </div>
+
+      {/* Exchange Rate Card */}
+      <ExchangeRateCard />
     </div>
   );
 }

@@ -19,14 +19,7 @@ interface ClientFormData {
   domicilio_obra: string;
   telefono: string;
   email: string;
-  presupuesto_observacion: string;
-  fecha_alta: string;
-  denominacion: string;
-  plan_pago: string;
   observaciones: string;
-  tiempo_obra_estimado: string;
-  agenda_inicio: string;
-  agenda_cierre: string;
 }
 
 const EMPTY_FORM: ClientFormData = {
@@ -37,14 +30,7 @@ const EMPTY_FORM: ClientFormData = {
   domicilio_obra: "",
   telefono: "",
   email: "",
-  presupuesto_observacion: "",
-  fecha_alta: new Date().toISOString().split("T")[0],
-  denominacion: "",
-  plan_pago: "",
   observaciones: "",
-  tiempo_obra_estimado: "",
-  agenda_inicio: "",
-  agenda_cierre: "",
 };
 
 interface ClientFormProps {
@@ -205,84 +191,12 @@ export function ClientForm({
 
       <Separator />
 
-      {/* Datos de la operacion */}
+      {/* Observaciones Generales */}
       <div>
         <h3 className="mb-3 text-sm font-semibold text-foreground uppercase tracking-wide">
-          Datos de la Operacion
+          Observaciones
         </h3>
         <div className="grid gap-4 sm:grid-cols-2">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="fecha_alta">Fecha de Alta</Label>
-            <Input
-              id="fecha_alta"
-              type="date"
-              value={form.fecha_alta}
-              onChange={(e) => updateField("fecha_alta", e.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="denominacion">Denominacion de Obra</Label>
-            <Input
-              id="denominacion"
-              value={form.denominacion}
-              onChange={(e) => updateField("denominacion", e.target.value)}
-              placeholder="Nombre asignado a la obra"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5 sm:col-span-2">
-            <Label htmlFor="presupuesto_observacion">
-              Presupuesto Consolidado - Observaciones
-            </Label>
-            <Textarea
-              id="presupuesto_observacion"
-              value={form.presupuesto_observacion}
-              onChange={(e) =>
-                updateField("presupuesto_observacion", e.target.value)
-              }
-              placeholder="Observaciones del presupuesto..."
-              rows={2}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5 sm:col-span-2">
-            <Label htmlFor="plan_pago">Plan de Pago</Label>
-            <Textarea
-              id="plan_pago"
-              value={form.plan_pago}
-              onChange={(e) => updateField("plan_pago", e.target.value)}
-              placeholder="Detalles del plan de pago segun contrato..."
-              rows={2}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="tiempo_obra_estimado">Tiempo de Obra Estimado</Label>
-            <Input
-              id="tiempo_obra_estimado"
-              value={form.tiempo_obra_estimado}
-              onChange={(e) =>
-                updateField("tiempo_obra_estimado", e.target.value)
-              }
-              placeholder="Ej: 3 meses"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5" />
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="agenda_inicio">Agenda - Fecha Inicio</Label>
-            <Input
-              id="agenda_inicio"
-              type="date"
-              value={form.agenda_inicio}
-              onChange={(e) => updateField("agenda_inicio", e.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="agenda_cierre">Agenda - Fecha Cierre</Label>
-            <Input
-              id="agenda_cierre"
-              type="date"
-              value={form.agenda_cierre}
-              onChange={(e) => updateField("agenda_cierre", e.target.value)}
-            />
-          </div>
           <div className="flex flex-col gap-1.5 sm:col-span-2">
             <Label htmlFor="observaciones">Observaciones</Label>
             <Textarea

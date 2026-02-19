@@ -48,6 +48,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -89,6 +90,9 @@ export default function MaterialesPage() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [showBulkUpdate, setShowBulkUpdate] = useState(false);
   const [bulkPercentage, setBulkPercentage] = useState("");
+  const [bulkProvider, setBulkProvider] = useState("");
+  const [bulkProviderSearch, setBulkProviderSearch] = useState("");
+  const [bulkFilterByProvider, setBulkFilterByProvider] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedProvider, setSelectedProvider] = useState("");
   const [categoryMode, setCategoryMode] = useState<"select" | "create">("select");
@@ -172,12 +176,29 @@ export default function MaterialesPage() {
 
   async function handleBulkUpdate() {
     if (!bulkPercentage) return;
+
+    // Determine target materials based on provider filter (client-side)
+    let target = filtered;
+    if (bulkFilterByProvider) {
+      if (!bulkProvider) {
+        toast.error("Seleccioná un proveedor o desactiva el filtro por proveedor");
+        return;
+      }
+      target = filtered.filter((m) => (m.proveedor || "") === bulkProvider);
+    }
+
+    const ids = target.map((m) => m.id);
+    if (ids.length === 0) {
+      toast.error("No hay materiales que cumplan los filtros seleccionados");
+      return;
+    }
+
     const res = await fetch("/api/materiales", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         bulk_percentage: Number(bulkPercentage),
-        material_ids: filtered.map((m) => m.id),
+        material_ids: ids,
       }),
     });
     if (res.ok) {
@@ -185,6 +206,9 @@ export default function MaterialesPage() {
       mutate();
       setShowBulkUpdate(false);
       setBulkPercentage("");
+      setBulkProvider("");
+      setBulkProviderSearch("");
+      setBulkFilterByProvider(false);
     } else {
       toast.error("Error al actualizar precios");
     }
@@ -230,6 +254,49 @@ export default function MaterialesPage() {
               </DialogHeader>
               <div className="space-y-4">
                 <div className="space-y-2">
+                  <Label>Proveedor (opcional)</Label>
+                  <div className="flex gap-4 items-center">
+                    <div className="flex-1 space-y-2">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          placeholder="Buscar proveedor..."
+                          value={bulkProviderSearch}
+                          onChange={(e) => setBulkProviderSearch(e.target.value)}
+                          className="pl-10"
+                        />
+                      </div>
+                      <Select value={bulkProvider} onValueChange={setBulkProvider}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Seleccionar proveedor" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {providers
+                            .filter((p) =>
+                              p.toLowerCase().includes(bulkProviderSearch.toLowerCase())
+                            )
+                            .map((p) => (
+                              <SelectItem key={p} value={p}>
+                                {p}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        checked={bulkFilterByProvider}
+                        onCheckedChange={(v) => setBulkFilterByProvider(Boolean(v))}
+                      />
+                      <span className="text-sm">Aplicar sólo a proveedor seleccionado</span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Cuando está activado, la actualización afectará sólo a los materiales del proveedor seleccionado.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
                   <Label>Porcentaje de ajuste (%)</Label>
                   <Input
                     type="number"
@@ -242,14 +309,22 @@ export default function MaterialesPage() {
                     Usa valores negativos para reducir precios
                   </p>
                 </div>
-                <div className="flex justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => setShowBulkUpdate(false)}
-                  >
-                    Cancelar
-                  </Button>
-                  <Button onClick={handleBulkUpdate}>Aplicar</Button>
+
+                <div className="flex justify-between items-center">
+                  <div className="text-sm text-muted-foreground">
+                    {bulkFilterByProvider && bulkProvider
+                      ? `Se aplicará a ${filtered.filter((m) => (m.proveedor || '') === bulkProvider).length} materiales del proveedor "${bulkProvider}".`
+                      : `Se aplicará a ${filtered.length} materiales.`}
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowBulkUpdate(false)}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button onClick={handleBulkUpdate}>Aplicar</Button>
+                  </div>
                 </div>
               </div>
             </DialogContent>
